@@ -10,6 +10,8 @@ use std::io::prelude::*;
 
 mod lexer;
 mod tokens;
+mod ast;
+mod parser;
 
 fn main() {
     let mut file = File::open("examples/floating_arithmetic.par").unwrap();
