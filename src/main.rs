@@ -5,12 +5,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+use std::fs::File;
+use std::io::prelude::*;
+
 mod lexer;
 mod tokens;
 
 fn main() {
-    let source = "hello := \"world\";".to_string();
+    let mut file = File::open("examples/integer_arithmetic.par").unwrap();
+    let mut source = String::new();
+    let _ = file.read_to_string(&mut source);
 
     let tokens = lexer::lex(source);
-    println!("{:?}", tokens);
+    for token in tokens {
+        println!("{:?}", token);
+    }
 }

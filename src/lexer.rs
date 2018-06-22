@@ -67,13 +67,16 @@ fn add_lookahead_conditional_token(
     });
 }
 
-fn add_lexeme_token(ctx: &mut LexingContext, token_type: TokenType) {
-    let lexeme: String = ctx.source[ctx.start..ctx.current].iter().collect();
+fn get_lexeme(ctx: &mut LexingContext) -> String {
+    ctx.source[ctx.start..ctx.current].iter().collect()
+}
+
+fn add_lexeme_token(ctx: &mut LexingContext, lexeme: String, token_type: TokenType) {
     ctx.tokens.push(Token {
         token_type,
         lexeme: Some(lexeme),
         line: ctx.line,
-    })
+    });
 }
 
 fn single_line_comment(ctx: &mut LexingContext) {
@@ -96,14 +99,29 @@ fn string(ctx: &mut LexingContext) {
 
     //Consume closing "
     advance(ctx);
-    add_lexeme_token(ctx, TokenType::String);
+    let lexeme = get_lexeme(ctx);
+    let string_content = lexeme[1..(lexeme.len()-1)].to_string();
+    add_lexeme_token(ctx, string_content, TokenType::String);
+}
+
+fn number(ctx: &mut LexingContext) {
+    while peek(ctx).is_numeric() {
+        advance(ctx);
+    }
+    let lexeme = get_lexeme(ctx);
+    add_lexeme_token(ctx, lexeme, TokenType::Integer);
 }
 
 fn identifier(ctx: &mut LexingContext) {
     while peek(ctx).is_alphanumeric() {
         advance(ctx);
     }
-    add_lexeme_token(ctx, TokenType::Identifier);
+    let lexeme = get_lexeme(ctx);
+    if let Some(t) = is_keyword(lexeme.as_str()) {
+        add_simple_token(ctx, t);
+    } else {
+        add_lexeme_token(ctx, lexeme, TokenType::Identifier);
+    }
 }
 
 fn scan_token(ctx: &mut LexingContext) {
@@ -123,8 +141,9 @@ fn scan_token(ctx: &mut LexingContext) {
         '*' => add_simple_token(ctx, Star),
         '^' => add_simple_token(ctx, Hat),
         ';' => add_simple_token(ctx, Semicolon),
-        ':' => add_simple_token(ctx, Colon),
         '.' => add_simple_token(ctx, Dot),
+        ',' => add_simple_token(ctx, Comma),
+        ':' => add_lookahead_conditional_token(ctx, ':', ColonColon, Colon),
         '=' => add_lookahead_conditional_token(ctx, '=', EqualEqual, Equal),
         '!' => add_lookahead_conditional_token(ctx, '=', BangEqual, Bang),
         '<' => add_lookahead_conditional_token(ctx, '=', LessEqual, Less),
@@ -142,10 +161,12 @@ fn scan_token(ctx: &mut LexingContext) {
         '\n' => ctx.line += 1,
         '"' => string(ctx),
         _ => {
-            if c.is_alphabetic() {
+            if c.is_numeric() {
+                number(ctx);
+            } else if c.is_alphabetic() {
                 identifier(ctx);
             } else {
-                panic!("Unexpected character");
+                panic!("Unexpected character {}", c);
             }
         }
     }

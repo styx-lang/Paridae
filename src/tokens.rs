@@ -13,6 +13,11 @@ pub enum TokenType {
     Const,
     Continue,
     Defer,
+    Else,
+    For,
+    If,
+    Return,
+    Struct,
     //Operators and punctuation
     Plus,
     Minus,
@@ -38,6 +43,7 @@ pub enum TokenType {
     Comma,
     Dot,
     Colon,
+    ColonColon,
     Semicolon,
     //Literals
     Integer,
@@ -52,3 +58,23 @@ pub struct Token {
     pub lexeme: Option<String>,
     pub line: usize,
 }
+
+
+pub fn is_keyword(s: &str) -> Option<TokenType> {
+    use self::TokenType::*;
+
+    // Apparently Rust does not yet support static const HashMaps?
+    match s {
+        "break" => Some(Break),
+        "const" => Some(Const),
+        "continue" => Some(Continue),
+        "defer" => Some(Defer),
+        "else" => Some(Else),
+        "for" => Some(For),
+        "if" => Some(If),
+        "return" => Some(Return),
+        "struct" => Some(Struct),
+        _ => None
+    }
+}
+
