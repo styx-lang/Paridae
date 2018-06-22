@@ -12,7 +12,7 @@ mod lexer;
 mod tokens;
 
 fn main() {
-    let mut file = File::open("examples/integer_arithmetic.par").unwrap();
+    let mut file = File::open("examples/floating_arithmetic.par").unwrap();
     let mut source = String::new();
     let _ = file.read_to_string(&mut source);
 

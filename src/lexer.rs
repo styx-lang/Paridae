@@ -27,12 +27,16 @@ impl LexingContext {
     }
 }
 
-fn peek(ctx: &mut LexingContext) -> char {
+fn peek_offset(ctx: &mut LexingContext, offset: usize) -> char {
     if is_done(ctx) {
         '\0'
     } else {
-        *ctx.source.get(ctx.current).unwrap()
+        *ctx.source.get(ctx.current + offset).unwrap()
     }
+}
+
+fn peek(ctx: &mut LexingContext) -> char {
+    peek_offset(ctx, 0)
 }
 
 fn advance(ctx: &mut LexingContext) -> char {
@@ -105,15 +109,32 @@ fn string(ctx: &mut LexingContext) {
 }
 
 fn number(ctx: &mut LexingContext) {
+
     while peek(ctx).is_numeric() {
         advance(ctx);
     }
+
+    let mut dot_encountered = false;
+    if peek(ctx) == '.' && peek_offset(ctx, 1).is_numeric() {
+        dot_encountered = true;
+        advance(ctx);
+        while peek(ctx).is_numeric() {
+            advance(ctx);
+        }
+    }
+
     let lexeme = get_lexeme(ctx);
-    add_lexeme_token(ctx, lexeme, TokenType::Integer);
+    let t = if dot_encountered {
+        TokenType::Float
+    } else {
+        TokenType::Integer
+    };
+
+    add_lexeme_token(ctx, lexeme, t);
 }
 
 fn identifier(ctx: &mut LexingContext) {
-    while peek(ctx).is_alphanumeric() {
+    while peek(ctx).is_alphanumeric() || peek(ctx) == '_' {
         advance(ctx);
     }
     let lexeme = get_lexeme(ctx);
@@ -148,6 +169,8 @@ fn scan_token(ctx: &mut LexingContext) {
         '!' => add_lookahead_conditional_token(ctx, '=', BangEqual, Bang),
         '<' => add_lookahead_conditional_token(ctx, '=', LessEqual, Less),
         '>' => add_lookahead_conditional_token(ctx, '=', GreaterEqual, Greater),
+        '&' => add_lookahead_conditional_token(ctx, '&', AndAnd, And),
+        '|' => add_lookahead_conditional_token(ctx, '|', OrOr, Or),
         '/' => {
             let next = peek(ctx);
             if next == '/' {
@@ -163,7 +186,7 @@ fn scan_token(ctx: &mut LexingContext) {
         _ => {
             if c.is_numeric() {
                 number(ctx);
-            } else if c.is_alphabetic() {
+            } else if c.is_alphabetic() || c == '_' {
                 identifier(ctx);
             } else {
                 panic!("Unexpected character {}", c);

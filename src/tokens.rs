@@ -24,7 +24,9 @@ pub enum TokenType {
     Star,
     Slash,
     And,
+    AndAnd,
     Or,
+    OrOr,
     Hat,
     Equal,
     Bang,
@@ -49,7 +51,8 @@ pub enum TokenType {
     Integer,
     Float,
     String,
-    Boolean,
+    True,
+    False
 }
 
 #[derive(Debug)]
@@ -70,10 +73,12 @@ pub fn is_keyword(s: &str) -> Option<TokenType> {
         "continue" => Some(Continue),
         "defer" => Some(Defer),
         "else" => Some(Else),
+        "false" => Some(False),
         "for" => Some(For),
         "if" => Some(If),
         "return" => Some(Return),
         "struct" => Some(Struct),
+        "true" => Some(True),
         _ => None
     }
 }

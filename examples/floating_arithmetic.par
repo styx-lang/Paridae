@@ -1,0 +1,23 @@
+
+main :: () {
+
+    //Find the real roots of a quadratic polynomial 3*x^2 - 2*x - 1.5
+    a := 3.0
+    b := -2
+    c := -1.5
+
+    discriminant := b*b - 4 * a * c;
+
+    if discriminant < 0 {
+        printf("The polynomial has no real roots\n");
+
+    } else if discriminant == 0 {
+        root := -b / 2 * a;
+        printf("The polynomial has a single real root: %f\n", root);
+
+    } else {
+        first_root := -b + sqrt(discriminant) / 2 * a;
+        second_root := -b + sqrt(discriminant) / 2 * a;
+        printf("The two roots of the polynomial are %f and %f\n", first_root, second_root);
+    }
+}
