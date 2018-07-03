@@ -12,20 +12,22 @@ use std::io::prelude::*;
 #[derive(Debug)]
 pub struct Item {
     pub name: String,
-    pub node: ItemKind
+    pub node: ItemKind,
+    pub line: usize,
 }
 
 #[derive(Debug)]
 pub enum ItemKind {
-    Const(Box<Type>, Box<Expr>),
-    Function(Box<Prototype>, Box<Block>),
-    Variable(Box<Type>, Box<Expr>),
+    ConstDecl(Box<Type>, Box<Expr>),
+    FunctionDecl(Box<Signature>, Option<Box<Block>>),
+    VariableDecl(Option<Box<Type>>, Box<Expr>),
+    TypeDecl(Box<Type>)
 }
 
 #[derive(Debug)]
-pub struct Prototype {
+pub struct Signature {
     pub inputs: Vec<(Box<Type>, String)>,
-    pub output: Box<Type>
+    pub output: Option<Box<Type>>
 }
 
 #[derive(Debug)]
@@ -40,14 +42,22 @@ pub struct Block {
 
 #[derive(Debug)]
 pub enum StmtKind {
+    //Assignment the result of the second expr to the result of the first expr
+    //p[12] = 42 * 2;
+    Assignment(Box<Expr>, Box<Expr>),
     Item(Box<Item>),
     Expr(Box<Expr>),
-    Semi(Box<Expr>)
+    Return(Box<Expr>),
+    Break,
+    Continue,
+    Defer(Box<Expr>),
+    While(Box<Expr>, Box<Block>),
+    Empty,
 }
 
 #[derive(Debug)]
 pub struct Type {
-
+    pub name: String
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,31 +96,19 @@ pub enum LitKind {
 
 #[derive(Debug)]
 pub enum ExprKind {
-    //Array ex: [1,2,3]
-    Array(Vec<Box<Expr>>),
-    //Assignment the result of the second expr to the result of the first expr
-    //p[12] = 42 * 2;
-    Assign(Box<Expr>, Box<Expr>),
     //Binary operator expression such as 12 * 42
     Binary(BinaryOperatorKind, Box<Expr>, Box<Expr>),
-    Block(Box<Block>),
-    Break,
     //Function call where the first expression resolves to the function
     //and the vector of expression resolves to each argument
     Call(Box<Expr>, Vec<Box<Expr>>),
-    Continue,
     Identifier(String),
     //If condition with optional else clause
-    // if expr1 expr2 else expr3
-    If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+    // if expr block1 [else block2]
+    If(Box<Expr>, Box<Block>, Option<Box<Block>>),
     //Literal such as 12 or "hello"
     Literal(Box<LitKind>),
-    //'return' an optional value from a block
-    Return(Option<Box<Expr>>),
     //Unary operators such as negation or pointer dereferencing
     Unary(UnaryOperatorKind, Box<Expr>),
-    // while expr1 expr2
-    While(Box<Expr>, Box<Expr>),
 }
 
 fn visit_literal(lit: LitKind,  nodes: &mut Vec<String>) -> usize {
@@ -145,6 +143,12 @@ fn visit_binary_operator(bin_op: BinaryOperatorKind, left: Expr, right: Expr, ed
     id
 }
 
+fn visit_identifier(identifier: String, nodes:&mut Vec<String>) -> usize {
+    let id = nodes.len();
+    nodes.push(format!("n{} [label=\"{}\"];\n", id, identifier));
+    id
+}
+
 fn visit_expr(expr: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
     use self::ExprKind::*;
 
@@ -152,16 +156,17 @@ fn visit_expr(expr: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> 
         Unary(op, box inner) => visit_unary_operator(op, inner, edges, nodes),
         Binary(op, box left, box right) => visit_binary_operator(op, left, right, edges, nodes),
         Literal(box l) => visit_literal(l, nodes),
-        _ => panic!("Other expression types not yet supported!"),
+        Identifier(s) => visit_identifier(s, nodes),
+        _ => panic!("Other expression types not yet supported! {:?}", expr.node),
     }
 }
 
-pub fn dump_parse_tree(ast: Expr, filename: &str) {
+pub fn dump_parse_tree(expr: Expr, filename: &str) {
 
     let mut edges = Vec::new();
     let mut nodes = Vec::new();
 
-    visit_expr(ast, &mut edges, &mut nodes);
+    visit_expr(expr, &mut edges, &mut nodes);
 
     let mut lines = Vec::new();
     let header = r#"

@@ -19,6 +19,7 @@ pub enum TokenType {
     If,
     Return,
     Struct,
+    While,
     //Operators and punctuation
     Plus,
     Minus,
@@ -48,6 +49,7 @@ pub enum TokenType {
     Colon,
     ColonColon,
     Semicolon,
+    Arrow,
     //Literals
     Integer,
     Float,

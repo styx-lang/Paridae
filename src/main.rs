@@ -15,17 +15,17 @@ mod ast;
 mod parser;
 
 fn main() {
-    //let mut file = File::open("examples/floating_arithmetic.par").unwrap();
-    let mut source = "1 * 2 + 3 * 4".to_string(); // String::new();
-    //let _ = file.read_to_string(&mut source);
+    let mut file = File::open("examples/floating_arithmetic.par").unwrap();
+    let mut source = String::new();
+    let _ = file.read_to_string(&mut source);
 
     let tokens = lexer::lex(source);
     for token in tokens.clone() {
         println!("{:?}", token);
     }
-    let expr = parser::parse(tokens);
+    let items = parser::parse(tokens);
 
-    println!("{:?}", expr);
+    println!("{:?}", items);
 
-    ast::dump_parse_tree(expr, "parse_tree.gv");;
+    //ast::dump_parse_tree(expr, "parse_tree.gv");;
 }
