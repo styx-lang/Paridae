@@ -2,9 +2,9 @@
 main :: () {
 
     //Find the real roots of a quadratic polynomial 3*x^2 - 2*x - 1.5
-    a := 3.0
-    b := -2
-    c := -1.5
+    a := 3.0;
+    b := -2;
+    c := -1.5;
 
     discriminant := b*b - 4 * a * c;
 

@@ -12,6 +12,7 @@ use std::io::prelude::*;
 mod lexer;
 mod tokens;
 mod ast;
+mod ast_visualization;
 mod parser;
 
 fn main() {
@@ -25,7 +26,10 @@ fn main() {
     }
     let items = parser::parse(tokens);
 
-    println!("{:?}", items);
+    for item in &items {
+        println!("{:?}", item);
+    }
 
-    //ast::dump_parse_tree(expr, "parse_tree.gv");;
+
+    ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");;
 }

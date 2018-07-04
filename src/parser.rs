@@ -157,7 +157,7 @@ fn parse_call(ctx: &mut ParsingContext, left: Expr) -> Expr {
     if !accept(ctx, RightParen) {
         loop {
             let expr = parse_expression(ctx, 0);
-            args.push((box expr));
+            args.push(box expr);
             if !accept(ctx, Comma) { break; }
         }
         expect(ctx, RightParen);
@@ -251,7 +251,7 @@ fn parse_assignment(ctx: &mut ParsingContext) -> Stmt {
 fn parse_stmt(ctx: &mut ParsingContext) -> Stmt {
     use self::TokenType::*;
 
-    if accept(ctx, Break) {
+    let result = if accept(ctx, Break) {
         Stmt { node: StmtKind::Break }
     } else if accept(ctx, Continue) {
         Stmt { node: StmtKind::Continue }
@@ -282,8 +282,11 @@ fn parse_stmt(ctx: &mut ParsingContext) -> Stmt {
                 panic!("Unexpected token {:?} on line {} ", next, next.line);
             }
         }
-
+    };
+    if look_ahead(ctx, 0).token_type != RightCurly {
+        expect(ctx, Semicolon);
     }
+    result
 }
 
 fn parse_block(ctx: &mut ParsingContext) -> Block {
