@@ -24,9 +24,9 @@ fn visit_literal(lit: LitKind,  nodes: &mut Vec<String>) -> usize {
     id
 }
 
-fn visit_unary_operator(bin_op: UnaryOperatorKind, inner: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
+fn visit_unary_operator(op: UnaryOperatorKind, inner: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
     let id = nodes.len();
-    nodes.push(format!("n{} [label=\"{:?}\"];\n", id, bin_op));
+    nodes.push(format!("n{} [label=\"{:?}\"];\n", id, op));
     let inner_id = visit_expr(inner, edges, nodes);
     edges.push(format!("n{} -> n{};\n", id, inner_id));
     id
@@ -107,7 +107,11 @@ fn visit_keyword(name: &str, edges: &mut Vec<String>,  nodes: &mut Vec<String>) 
 }
 
 fn visit_keyword_expr(name: &str, expr: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
-    panic!("Not yet implemented");
+    let id = nodes.len();
+    nodes.push(format!("n{} [label=\"{}\"];\n", id, name));
+    let inner_id = visit_expr(expr, edges, nodes);
+    edges.push(format!("n{} -> n{};\n", id, inner_id));
+    id
 }
 
 fn visit_while(condition: Expr, block: Block, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {

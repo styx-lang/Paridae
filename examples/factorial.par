@@ -1,0 +1,10 @@
+
+factorial :: (n: i32) -> i32 {
+    return 4 * n;
+}
+
+_paridae_entry :: () -> i32 {
+    a := 2;
+    b := 3;
+    return factorial(a*b);
+}

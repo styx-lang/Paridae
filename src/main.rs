@@ -20,7 +20,7 @@ mod parser;
 mod codegen;
 
 fn main() {
-    let mut file = File::open("examples/integer_arithmetic.par").unwrap();
+    let mut file = File::open("examples/factorial.par").unwrap();
     let mut source = String::new();
     let _ = file.read_to_string(&mut source);
 
@@ -34,7 +34,9 @@ fn main() {
 
     ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");
 
-    let llir = codegen::generate(items);
+    let llir = unsafe {
+        codegen::generate(items)
+    };
 
     let mut output_file = File::create("main.ll").unwrap();
     let _ = output_file.write(llir.as_bytes());

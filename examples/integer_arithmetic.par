@@ -1,12 +1,8 @@
 
 
-main :: () {
+_paridae_entry :: () -> i32 {
     a := 12;
     b := 42;
     c := 3 * (b-a) / 6;
-    if  c > 0 {
-        printf("The result is positive: %d\n", c);
-    } else {
-        printf("The result is non-positive: %d\n", c);
-    }
+    return c;
 }
