@@ -6,7 +6,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+extern crate llvm_sys as llvm;
+
 use std::fs::File;
+use std::io::Write;
 use std::io::prelude::*;
 
 mod lexer;
@@ -14,22 +17,25 @@ mod tokens;
 mod ast;
 mod ast_visualization;
 mod parser;
+mod codegen;
 
 fn main() {
-    let mut file = File::open("examples/floating_arithmetic.par").unwrap();
+    let mut file = File::open("examples/integer_arithmetic.par").unwrap();
     let mut source = String::new();
     let _ = file.read_to_string(&mut source);
 
     let tokens = lexer::lex(source);
-    for token in tokens.clone() {
-        println!("{:?}", token);
-    }
     let items = parser::parse(tokens);
 
-    for item in &items {
+    /*for item in &items {
         println!("{:?}", item);
-    }
+    }*/
 
 
-    ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");;
+    ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");
+
+    let llir = codegen::generate(items);
+
+    let mut output_file = File::create("main.ll").unwrap();
+    let _ = output_file.write(llir.as_bytes());
 }
