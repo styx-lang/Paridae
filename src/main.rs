@@ -20,7 +20,7 @@ mod parser;
 mod codegen;
 
 fn main() {
-    let mut file = File::open("examples/factorial.par").unwrap();
+    let mut file = File::open("examples/fibonacci.par").unwrap();
     let mut source = String::new();
     let _ = file.read_to_string(&mut source);
 

@@ -3,5 +3,7 @@
 int _paridae_entry();
 
 int main(int argc, const char** argv) { 
-    return _paridae_entry();
+    int res = _paridae_entry();
+    printf("%d\n", res);
+    return res;
 }

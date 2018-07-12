@@ -6,6 +6,7 @@
  */
 
 use ast::*;
+use llvm::*;
 use llvm::core::*;
 use llvm::prelude::*;
 use std::ffi::{CStr, CString};
@@ -51,11 +52,11 @@ unsafe fn generate_identifier(ident: String, ctx: &CodeGenContext) -> LLVMValueR
     LLVMBuildLoad(ctx.builder, ptr, ident.as_bytes().as_ptr() as *const _)
 }
 
-unsafe fn generate_unary_operator(op: UnaryOperatorKind, inner: Expr, ctx: &CodeGenContext) -> LLVMValueRef {
+unsafe fn generate_unary_operator(op: UnaryOperatorKind, inner: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
     panic!("Not yet implemented");
 }
 
-unsafe fn generate_binary_operator(bin_op: BinaryOperatorKind, left: Expr, right: Expr, ctx: &CodeGenContext) -> LLVMValueRef {
+unsafe fn generate_binary_operator(bin_op: BinaryOperatorKind, left: Expr, right: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
     use self::BinaryOperatorKind::*;
 
     let lhs = generate_expr(left, ctx);
@@ -66,17 +67,23 @@ unsafe fn generate_binary_operator(bin_op: BinaryOperatorKind, left: Expr, right
         Subtraction => LLVMBuildSub(ctx.builder, lhs, rhs, b"sub_tmp\0".as_ptr() as *const _),
         Product => LLVMBuildMul(ctx.builder, lhs, rhs, b"mul_tmp\0".as_ptr() as *const _),
         Division => LLVMBuildSDiv(ctx.builder, lhs, rhs, b"div_tmp\0".as_ptr() as *const _),
+        Equality => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntEQ, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
+        NotEq => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntNE, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
+        Less => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntSLT, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
+        LessEq => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntSLE, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
+        Greater => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntSGT, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
+        GreaterEq => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntSGE, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
         _ => panic!("Other binary operators not yet supported {:?}", bin_op),
     }
 }
 
-unsafe fn generate_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &CodeGenContext) -> LLVMValueRef {
+unsafe fn generate_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &mut CodeGenContext) -> LLVMValueRef {
     let name = if let ExprKind::Identifier(s) = fun.node {
         s
     } else {
         panic!("Higher order functions not yet supported!");
     };
-    let function = LLVMGetNamedFunction(ctx.module, b"factorial\0".as_ptr() as *const _); //name.as_bytes()
+    let function = LLVMGetNamedFunction(ctx.module, name.as_bytes().as_ptr() as *const _); //name.as_bytes()
     let expected_count = LLVMCountParams(function) as usize;
     if args.len() != expected_count {
         panic!("Expected {} arguments in function call to {} but got {}", expected_count, name, args.len());
@@ -91,11 +98,37 @@ unsafe fn generate_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &CodeGenContext) -
     res
 }
 
-unsafe fn generate_condition(condition: Expr, then: Block, otherwise: Option<Box<Block>>, ctx: &CodeGenContext) -> LLVMValueRef {
-    panic!("Conditions not yet implemented!");
+unsafe fn generate_condition(condition: Expr, then: Block, otherwise: Option<Box<Block>>, ctx: &mut CodeGenContext) -> LLVMValueRef {
+    let condition_value = generate_expr(condition, ctx);
+
+    let bot = LLVMConstInt(LLVMInt1TypeInContext(ctx.llvm_context), 0, 0);
+    let branch_flag = LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntNE, condition_value, bot, b"ifcond\0".as_ptr() as *const _);
+
+    let parent_function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder));
+
+    let mut then_bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, parent_function, b"then\0".as_ptr() as *const _);
+
+    if let Some(box o) = otherwise {
+        let mut else_bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, parent_function, b"else\0".as_ptr() as *const _);
+        let merge_bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, parent_function, b"ifcont\0".as_ptr() as *const _);
+        LLVMBuildCondBr(ctx.builder, branch_flag, then_bb, else_bb);
+        LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
+        let then_val = generate_block(then, ctx);
+        LLVMBuildBr(ctx.builder, merge_bb);
+        then_bb = LLVMGetInsertBlock(ctx.builder);
+        LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
+        let otherwise_val = generate_block(o, ctx);
+        LLVMBuildBr(ctx.builder, merge_bb);
+        else_bb = LLVMGetInsertBlock(ctx.builder);
+        LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
+
+        LLVMBuildIntCast(ctx.builder, condition_value, LLVMInt32TypeInContext(ctx.llvm_context), b"ret_cast\0".as_ptr() as *const _)
+    } else {
+        panic!("Stand alone ifs not yet supported");
+    }
 }
 
-unsafe fn generate_expr(expr: Expr, ctx: &CodeGenContext) -> LLVMValueRef {
+unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
     use self::ExprKind::*;
     
     match expr.node {
@@ -109,7 +142,7 @@ unsafe fn generate_expr(expr: Expr, ctx: &CodeGenContext) -> LLVMValueRef {
     }
 }
 
-unsafe fn generate_return(e: Expr, ctx: &CodeGenContext) {
+unsafe fn generate_return(e: Expr, ctx: &mut CodeGenContext) {
     let v = generate_expr(e, ctx);
     LLVMBuildRet(ctx.builder, v);
 }
@@ -120,6 +153,9 @@ unsafe fn generate_stmt(stmt: Stmt, ctx: &mut CodeGenContext) {
     match stmt.node {
         Return(box e) => generate_return(e, ctx),
         Item(box i) => generate_item(i, ctx),
+        Expr(box e) => {
+            let _ = generate_expr(e, ctx);
+        },
         _ => panic!("Other statement kinds not yet supported {:?}", stmt.node),
     }
 }
@@ -158,6 +194,7 @@ unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box
         }
         generate_block(*b, ctx);
     }
+    LLVMBuildUnreachable(ctx.builder);
 }
 
 unsafe fn generate_variable_decl(name: String, _type: Option<Box<Type>>, expr: Expr, ctx: &mut CodeGenContext) {

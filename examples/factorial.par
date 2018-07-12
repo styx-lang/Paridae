@@ -1,10 +1,12 @@
 
 factorial :: (n: i32) -> i32 {
-    return 4 * n;
+    if n == 1 {
+        return 1;
+    } else {
+        return n * factorial(n-1);
+    }
 }
 
 _paridae_entry :: () -> i32 {
-    a := 2;
-    b := 3;
-    return factorial(a*b);
+    return factorial(10);
 }
