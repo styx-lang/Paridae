@@ -1,5 +1,5 @@
 
-fib :: (n: i32) -> i32 {
+fib :: (n: s32) -> s32 {
   if n < 2 {
       return n;
   } else {
@@ -7,6 +7,6 @@ fib :: (n: i32) -> i32 {
   }
 }
 
-_paridae_entry :: () -> i32 {
+_paridae_entry :: () -> s32 {
     return fib(20);
 }

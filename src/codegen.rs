@@ -10,8 +10,6 @@ use llvm::*;
 use llvm::core::*;
 use llvm::prelude::*;
 use std::ffi::{CStr, CString};
-use std::ptr;
-use std::fs::File;
 use std::collections::HashMap;
 
 struct CodeGenContext {
@@ -22,15 +20,19 @@ struct CodeGenContext {
 }
 
 unsafe fn get_type(t: Type, ctx: &CodeGenContext) -> LLVMTypeRef {
-   match t.name.as_ref() {
-       "int" => LLVMInt32TypeInContext(ctx.llvm_context),
-       "i8" | "u8" => LLVMInt8TypeInContext(ctx.llvm_context),
-       "i16" | "u16" => LLVMInt16TypeInContext(ctx.llvm_context),
-       "i32" | "u32" => LLVMInt32TypeInContext(ctx.llvm_context),
-       "i64" | "u32"=> LLVMInt64TypeInContext(ctx.llvm_context),
-       "f32" => LLVMFloatTypeInContext(ctx.llvm_context),
-       "f64" => LLVMDoubleTypeInContext(ctx.llvm_context),
-       other => panic!("CodeGen does not support {} yet", other),
+    use self::Type::*;
+    use self::IntegerSize::*;
+    use self::FloatingSize::*;
+
+    match t {
+        Signed(I8) | Unsigned(I8) => LLVMInt8TypeInContext(ctx.llvm_context),
+        Signed(I16) | Unsigned(I16) => LLVMInt16TypeInContext(ctx.llvm_context),
+        Signed(I32) | Unsigned(I32) => LLVMInt32TypeInContext(ctx.llvm_context),
+        Signed(I64) | Unsigned(I64) => LLVMInt64TypeInContext(ctx.llvm_context),
+        Signed(Arch) | Unsigned(Arch) => LLVMInt64TypeInContext(ctx.llvm_context),
+        Float(F32) => LLVMFloatTypeInContext(ctx.llvm_context),
+        Float(F64) => LLVMDoubleTypeInContext(ctx.llvm_context),
+        other => panic!("CodeGen does not support {:?} yet", other),
    }
 }
 
@@ -38,11 +40,11 @@ unsafe fn generate_int_literal(val: i64, t: Type, ctx: &CodeGenContext) -> LLVMV
     LLVMConstInt(get_type(t, ctx), val as u64, 0)
 }
 
-unsafe fn generate_literal(lit: LitKind, ctx: &CodeGenContext) -> LLVMValueRef {
+unsafe fn generate_literal(lit: LitKind, t: Type, ctx: &CodeGenContext) -> LLVMValueRef {
     use self::LitKind::*;
 
     match lit {
-        Int(i) => generate_int_literal(i, Type {name: String::from("i32")}, ctx),
+        Int(i) => generate_int_literal(i, t, ctx),
         _ => panic!("Literal type not yet supported!")
     }
 }
@@ -134,7 +136,7 @@ unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
     match expr.node {
         Unary(op, box inner) => generate_unary_operator(op, inner, ctx),
         Binary(op, box lhs, box rhs) => generate_binary_operator(op, lhs, rhs, ctx),
-        Literal(box lit) => generate_literal(lit, ctx),
+        Literal(box lit) => generate_literal(lit, expr.t, ctx),
         Identifier(s) => generate_identifier(s, ctx),
         Call(box fun, args) => generate_call(fun, args, ctx),
         If(box condition, box then, otherwise) => generate_condition(condition, then, otherwise, ctx),
@@ -167,13 +169,13 @@ unsafe fn generate_block(block: Block, ctx: &mut CodeGenContext) {
 }
 
 unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box<Block>>, ctx: &mut CodeGenContext) {
-    let ret_type = if let Some(t) = sig.output {
-        get_type(*t, ctx)
+    let ret_type = if sig.output != Type::Void {
+        get_type(sig.output, ctx)
     } else {
         LLVMVoidTypeInContext(ctx.llvm_context)
     };
     let mut args = Vec::new();
-    for (box t, n) in &sig.inputs {
+    for (t, n) in &sig.inputs {
         let arg_type = get_type(t.clone(), ctx);
         args.push(arg_type);
     }
@@ -186,7 +188,7 @@ unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box
     if let Some(b) = block {
         let bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, function, b"entry\0".as_ptr() as *const _);
         LLVMPositionBuilderAtEnd(ctx.builder, bb);
-        for (idx, (box t, n)) in sig.inputs.iter().enumerate() {
+        for (idx, (t, n)) in sig.inputs.iter().enumerate() {
             let arg_type = get_type(t.clone(), ctx);
             let allocation = LLVMBuildAlloca(ctx.builder, arg_type, n.as_bytes().as_ptr() as *const _);
             LLVMBuildStore(ctx.builder, LLVMGetParam(function, idx as u32), allocation);
@@ -197,22 +199,17 @@ unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box
     LLVMBuildUnreachable(ctx.builder);
 }
 
-unsafe fn generate_variable_decl(name: String, _type: Option<Box<Type>>, expr: Expr, ctx: &mut CodeGenContext) {
+unsafe fn generate_variable_decl(name: String, _type: Type, expr: Expr, ctx: &mut CodeGenContext) {
     let initial_value = generate_expr(expr, ctx);
 
-    let llvm_type = if let Some(box t) = _type {
-        get_type(t, ctx)
-    } else {
-        get_type(Type {name: String::from("i32")}, ctx)
-    };
     let variable_name = CString::new(name.as_bytes()).unwrap();
-    let allocation = LLVMBuildAlloca(ctx.builder, llvm_type, variable_name.as_ptr() as *const _);
+    let allocation = LLVMBuildAlloca(ctx.builder, get_type(_type, ctx), variable_name.as_ptr() as *const _);
     let store = LLVMBuildStore(ctx.builder, initial_value, allocation);
     ctx.identifiers.insert(name, allocation);
 
 }
 
-unsafe fn generate_const_decl(name: String, _type: Option<Box<Type>>, expr: Expr, ctx: &CodeGenContext) {
+unsafe fn generate_const_decl(name: String, _type: Type, expr: Expr, ctx: &CodeGenContext) {
     panic!("Not yet implemented");
 }
 
@@ -227,8 +224,8 @@ unsafe fn generate_item(item: Item, ctx: &mut CodeGenContext) {
     match item.node {
         FunctionDecl(box sig, block) => generate_function_decl(name, sig, block, ctx),
         VariableDecl(t, box expr) => generate_variable_decl(name, t, expr, ctx),
-        ConstDecl(t, box expr) => generate_variable_decl(name, t, expr, ctx),
-        TypeDecl(box t) => generate_type_decl(name, t, ctx),
+        ConstDecl(t, box expr) => generate_const_decl(name, t, expr, ctx),
+        TypeDecl(t) => generate_type_decl(name, t, ctx),
     }
 }
 

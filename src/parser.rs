@@ -59,7 +59,7 @@ fn parse_if(ctx: &mut ParsingContext) -> Expr {
         None
     };
 
-    Expr { node: ExprKind::If(box condition, box then, otherwise), t: None }
+    Expr { node: ExprKind::If(box condition, box then, otherwise), t: Type::Infer }
 }
 
 fn get_precedence(operator: BinaryOperatorKind) -> u32 {
@@ -81,21 +81,21 @@ fn get_precedence(operator: BinaryOperatorKind) -> u32 {
 
 fn parse_integer_literal(ctx: &mut ParsingContext, token: Token) -> Expr {
     let n = token.lexeme.unwrap().parse::<i64>().unwrap();
-    Expr {node: ExprKind::Literal(Box::new(LitKind::Int(n))), t: None }
+    Expr {node: ExprKind::Literal(Box::new(LitKind::Int(n))), t: Type::Signed(IntegerSize::Unspecified) }
 }
 
 fn parse_float_literal(ctx: &mut ParsingContext, token: Token) -> Expr {
     let f = token.lexeme.unwrap().parse::<f64>().unwrap();
-    Expr {node: ExprKind::Literal(Box::new(LitKind::Float(f))), t: None }
+    Expr {node: ExprKind::Literal(Box::new(LitKind::Float(f))), t: Type::Float(FloatingSize::Unspecified) }
 }
 
 fn parse_string_literal(ctx: &mut ParsingContext, token: Token) -> Expr {
     let s = token.lexeme.unwrap();
-    Expr {node: ExprKind::Literal(Box::new(LitKind::Str(s))), t: None }
+    Expr {node: ExprKind::Literal(Box::new(LitKind::Str(s))), t: Type::Infer }
 }
 
 fn parse_identifier(ctx: &mut ParsingContext, token: Token) -> Expr {
-    Expr{ node: ExprKind::Identifier(token.lexeme.unwrap()), t: None }
+    Expr{ node: ExprKind::Identifier(token.lexeme.unwrap()), t: Type::Infer }
 }
 
 fn parse_prefix_operator(ctx: &mut ParsingContext, token: Token) -> Expr {
@@ -108,7 +108,7 @@ fn parse_prefix_operator(ctx: &mut ParsingContext, token: Token) -> Expr {
     };
 
     let operand = parse_expression(ctx, 6);
-    Expr{ node: ExprKind::Unary(operation, Box::new(operand)), t: None }
+    Expr{ node: ExprKind::Unary(operation, Box::new(operand)), t: Type::Infer }
 }
 
 fn convert_token_to_binary_operator(token: TokenType) -> Option<BinaryOperatorKind> {
@@ -134,7 +134,7 @@ fn parse_binary_operator(ctx: &mut ParsingContext, left: Expr, operator: BinaryO
     let precedence = get_precedence(operator);
     let right = parse_expression(ctx, precedence);
 
-    Expr{ node: ExprKind::Binary(operator, Box::new(left), Box::new(right)), t: None }
+    Expr{ node: ExprKind::Binary(operator, Box::new(left), Box::new(right)), t: Type::Infer }
 }
 
 fn parse_infix_operator(ctx: &mut ParsingContext, left: Expr, token: Token) -> Expr {
@@ -163,7 +163,7 @@ fn parse_call(ctx: &mut ParsingContext, left: Expr) -> Expr {
         expect(ctx, RightParen);
     }
 
-    Expr {node: ExprKind::Call(box left,  args), t: None }
+    Expr {node: ExprKind::Call(box left,  args), t: Type::Infer }
 }
 
 fn get_current_precedence(ctx: &mut ParsingContext) -> u32 {
@@ -216,7 +216,7 @@ fn parse_expression(ctx: &mut ParsingContext, precedence: u32) -> Expr {
 fn parse_type(ctx: &mut ParsingContext) -> Type {
     let token = consume(ctx);
     if token.token_type == TokenType::Identifier {
-        Type {name: token.lexeme.unwrap() }
+        Type::Unchecked(token.lexeme.unwrap())
     } else {
         panic!("Expected type but got {:?} on line {:?}", token.token_type, token.line);
     }
@@ -226,11 +226,11 @@ fn parse_variable_decl(ctx: &mut ParsingContext) -> Item {
     let identifier = consume(ctx);
     expect(ctx, TokenType::Colon);
     let _type = if accept(ctx, TokenType::Equal) {
-        None
+        Type::Infer
     } else {
         let t = parse_type(ctx);
         expect(ctx, TokenType::Equal);
-        Some(box t)
+        t
     };
     let expr = parse_expression(ctx, 0);
     let node = ItemKind::VariableDecl(_type, box expr);
@@ -317,16 +317,16 @@ fn parse_signature(ctx: &mut ParsingContext) -> Signature {
             }
             expect(ctx, Colon);
             let arg_type = parse_type(ctx);
-            inputs.push((box arg_type, arg_name.lexeme.unwrap()));
+            inputs.push((arg_type, arg_name.lexeme.unwrap()));
             if !accept(ctx, Comma) { break; }
         }
         expect(ctx, RightParen);
     }
 
     let output = if accept(ctx, Arrow) {
-        Some(box parse_type(ctx))
+        parse_type(ctx)
     } else {
-        None
+        Type::Void
     };
 
     Signature { inputs, output }

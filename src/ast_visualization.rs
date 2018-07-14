@@ -155,14 +155,9 @@ fn visit_function_decl(name: String, sig: Signature, block: Option<Box<Block>>, 
     id
 }
 
-fn visit_variable_decl(name: String, _type: Option<Box<Type>>, expr: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
+fn visit_variable_decl(name: String, _type: Type, expr: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
     let id = nodes.len();
-    let type_name = if let Some(box t) = _type {
-        t.to_string()
-    } else {
-        String::new()
-    };
-    nodes.push(format!("n{} [label=\"{}: {}\"];\n", id, name, type_name));
+    nodes.push(format!("n{} [label=\"{}: {}\"];\n", id, name, _type.to_string()));
     let inner_id = visit_expr(expr, edges, nodes);
     edges.push(format!("n{} -> n{};\n", id, inner_id));
     id
@@ -184,7 +179,7 @@ fn visit_item(item: Item, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> 
         FunctionDecl(box sig, block) => visit_function_decl(name, sig, block, edges, nodes),
         VariableDecl(t, box expr) => visit_variable_decl(name, t, expr, edges, nodes),
         ConstDecl(t, box expr) => visit_variable_decl(name, t, expr, edges, nodes),
-        TypeDecl(box t) => visit_type_decl(name, t, edges, nodes),
+        TypeDecl(t) => visit_type_decl(name, t, edges, nodes),
     }
 }
 

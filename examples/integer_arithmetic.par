@@ -1,6 +1,6 @@
 
 
-_paridae_entry :: () -> i32 {
+_paridae_entry :: () -> s32 {
     a := 12;
     b := 42;
     c := 3 * (b-a) / 6;

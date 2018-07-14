@@ -18,6 +18,7 @@ mod ast;
 mod ast_visualization;
 mod parser;
 mod codegen;
+mod type_checking;
 
 fn main() {
     let mut file = File::open("examples/fibonacci.par").unwrap();
@@ -34,8 +35,10 @@ fn main() {
 
     ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");
 
+    let typed_items = type_checking::check(items);
+
     let llir = unsafe {
-        codegen::generate(items)
+        codegen::generate(typed_items)
     };
 
     let mut output_file = File::create("main.ll").unwrap();

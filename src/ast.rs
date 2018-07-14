@@ -15,23 +15,23 @@ pub struct Item {
 
 #[derive(Debug, Clone)]
 pub enum ItemKind {
-    ConstDecl(Option<Box<Type>>, Box<Expr>),
+    ConstDecl(Type, Box<Expr>),
     FunctionDecl(Box<Signature>, Option<Box<Block>>),
-    VariableDecl(Option<Box<Type>>, Box<Expr>),
-    TypeDecl(Box<Type>)
+    VariableDecl(Type, Box<Expr>),
+    TypeDecl(Type)
 }
 
 #[derive(Debug, Clone)]
 pub struct Signature {
-    pub inputs: Vec<(Box<Type>, String)>,
-    pub output: Option<Box<Type>>
+    pub inputs: Vec<(Type, String)>,
+    pub output: Type
 }
 
 impl ToString for Signature {
     fn to_string(&self) -> String {
         let mut parts = Vec::new();
         parts.push(String::from("("));
-        for (box t, name) in &self.inputs {
+        for (t, name) in &self.inputs {
             parts.push(format!("{} : {}", name, t.to_string()));
             parts.push(String::from(", "));
         }
@@ -71,14 +71,42 @@ pub enum StmtKind {
     Empty,
 }
 
-#[derive(Debug, Clone)]
-pub struct Type {
-    pub name: String
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IntegerSize {
+    I8,
+    I16,
+    I32,
+    I64,
+    Arch,
+    Unspecified
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FloatingSize {
+    F32,
+    F64,
+    Unspecified
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Type {
+    Bool,
+    Signed(IntegerSize),
+    Unsigned(IntegerSize),
+    Float(FloatingSize),
+    Char,
+    Array(Box<Type>, usize),
+    Slice(Box<Type>),
+    Ptr(Box<Type>),
+    Void,
+    Function(Vec<Type>, Box<Type>),
+    Unchecked(String),
+    Infer,
 }
 
 impl ToString for Type {
     fn to_string(&self) -> String {
-        self.name.clone()
+        format!("{:?}", self)
     }
 }
 
@@ -105,7 +133,7 @@ pub enum BinaryOperatorKind {
 #[derive(Debug, Clone)]
 pub struct Expr {
     pub node: ExprKind,
-    pub t: Option<Type>
+    pub t: Type
 }
 
 #[derive(Debug, Clone)]
