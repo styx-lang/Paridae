@@ -10,16 +10,17 @@ use ast::*;
 
 struct TypeScope {
     symbols: HashMap<String, Type>,
-    parent: usize
+    parent: usize,
+    current_return_type: Type
 }
 
 struct TypeContext {
     current: usize,
-    scope_arena: Vec<TypeScope>
+    scope_arena: Vec<TypeScope>,
 }
 
-fn initialize_scope(ctx: &mut TypeContext) {
-    let new_scope = TypeScope { symbols: HashMap::new(), parent: ctx.current } ;
+fn initialize_scope(return_type: Type, ctx: &mut TypeContext) {
+    let new_scope = TypeScope { symbols: HashMap::new(), parent: ctx.current, current_return_type: return_type  } ;
     ctx.scope_arena.push(new_scope);
     ctx.current = ctx.scope_arena.len()-1;
 }
@@ -52,6 +53,10 @@ fn lookup_symbol(name: &String, ctx: &mut TypeContext) -> Type {
         }
     }
     panic!("Failed to find symbol {}", name);
+}
+
+fn get_current_return_type(ctx: &mut TypeContext) -> Type {
+    ctx.scope_arena[ctx.current].current_return_type.clone()
 }
 
 fn primitive_type_by_name(name: &String) -> Type {
@@ -226,7 +231,16 @@ fn check_expr(expr: Expr, ctx: &mut TypeContext) -> Expr {
 
 
 fn check_return(expr: Expr, ctx: &mut TypeContext) -> StmtKind {
-    let checked_expr = check_expr(expr, ctx);
+    let mut checked_expr = check_expr(expr, ctx);
+
+    let expected_type = get_current_return_type(ctx);
+    if checked_expr.t != expected_type {
+        if let Some(e) = try_implicit_cast(checked_expr.clone(), expected_type.clone(), ctx) {
+            checked_expr = e;
+        } else {
+            panic!("Trying to return type {:?} but expected {:?}", checked_expr.t, expected_type);
+        }
+    }
 
     StmtKind::Return(box checked_expr)
 }
@@ -279,7 +293,7 @@ fn check_function_decl(name: String, sig: Signature, block: Option<Box<Block>>, 
 
     let checked_block = if let Some(box b) = block {
 
-        initialize_scope(ctx);
+        initialize_scope( checked_output.clone(), ctx);
         for (param_type, param_name) in &checked_inputs {
             declare_symbol(param_name, param_type, ctx);
         }
@@ -329,9 +343,9 @@ fn check_item(item: Item, ctx: &mut TypeContext) -> Item {
 
 pub fn check(ast: Vec<Item>) -> Vec<Item> {
 
-    let global_scope = TypeScope { symbols: HashMap::new(), parent: 0 };
+    let global_scope = TypeScope { symbols: HashMap::new(), parent: 0, current_return_type: Type::Void };
 
-    let mut ctx = TypeContext {current: 0, scope_arena: vec![global_scope]};
+    let mut ctx = TypeContext { current: 0, scope_arena: vec![global_scope] };
 
     let mut resulting_ast = Vec::new();
 

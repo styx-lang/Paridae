@@ -12,11 +12,53 @@ use llvm::prelude::*;
 use std::ffi::{CStr, CString};
 use std::collections::HashMap;
 
+struct Scope {
+    symbols: HashMap<String, LLVMValueRef>,
+    parent: usize
+}
+
 struct CodeGenContext {
     llvm_context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMBuilderRef,
-    identifiers: HashMap<String, LLVMValueRef>
+    current_scope: usize,
+    scope_arena: Vec<Scope>
+}
+
+fn initialize_scope(ctx: &mut CodeGenContext) {
+    let new_scope = Scope { symbols: HashMap::new(), parent: ctx.current_scope } ;
+    ctx.scope_arena.push(new_scope);
+    ctx.current_scope = ctx.scope_arena.len()-1;
+}
+
+fn finalize_scope(ctx: &mut CodeGenContext) {
+    ctx.current_scope = ctx.scope_arena[ctx.current_scope].parent;
+}
+
+fn declare_symbol(name: &String, val: LLVMValueRef, ctx: &mut CodeGenContext) {
+    let mut current_scope = &mut ctx.scope_arena[ctx.current_scope].symbols;
+    if current_scope.contains_key(name) {
+        panic!("Redeclaring symbol {}", name);
+    }
+    current_scope.insert(name.clone(), val);
+}
+
+fn lookup_symbol(name: &String, ctx: &CodeGenContext) -> LLVMValueRef {
+    let mut reached_top = false;
+
+    let mut current = ctx.current_scope;
+    while !reached_top {
+        if current == 0 {
+            reached_top = true;
+        }
+        let current_scope = &ctx.scope_arena[current];
+        if let Some(val) = current_scope.symbols.get(name) {
+            return *val;
+        } else {
+            current = current_scope.parent;
+        }
+    }
+    panic!("Failed to find symbol {}", name);
 }
 
 unsafe fn get_type(t: Type, ctx: &CodeGenContext) -> LLVMTypeRef {
@@ -50,7 +92,7 @@ unsafe fn generate_literal(lit: LitKind, t: Type, ctx: &CodeGenContext) -> LLVMV
 }
 
 unsafe fn generate_identifier(ident: String, ctx: &CodeGenContext) -> LLVMValueRef {
-    let ptr = *ctx.identifiers.get(&ident).unwrap();
+    let ptr = lookup_symbol(&ident, ctx);
     LLVMBuildLoad(ctx.builder, ptr, ident.as_bytes().as_ptr() as *const _)
 }
 
@@ -115,13 +157,17 @@ unsafe fn generate_condition(condition: Expr, then: Block, otherwise: Option<Box
         let merge_bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, parent_function, b"ifcont\0".as_ptr() as *const _);
         LLVMBuildCondBr(ctx.builder, branch_flag, then_bb, else_bb);
         LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
+        initialize_scope(ctx);
         let then_val = generate_block(then, ctx);
         LLVMBuildBr(ctx.builder, merge_bb);
         then_bb = LLVMGetInsertBlock(ctx.builder);
+        finalize_scope(ctx);
+        initialize_scope(ctx);
         LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
         let otherwise_val = generate_block(o, ctx);
         LLVMBuildBr(ctx.builder, merge_bb);
         else_bb = LLVMGetInsertBlock(ctx.builder);
+        finalize_scope(ctx);
         LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
 
         LLVMBuildIntCast(ctx.builder, condition_value, LLVMInt32TypeInContext(ctx.llvm_context), b"ret_cast\0".as_ptr() as *const _)
@@ -186,17 +232,19 @@ unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box
                                                    function_type);
 
     if let Some(b) = block {
+        initialize_scope(ctx);
         let bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, function, b"entry\0".as_ptr() as *const _);
         LLVMPositionBuilderAtEnd(ctx.builder, bb);
         for (idx, (t, n)) in sig.inputs.iter().enumerate() {
             let arg_type = get_type(t.clone(), ctx);
             let allocation = LLVMBuildAlloca(ctx.builder, arg_type, n.as_bytes().as_ptr() as *const _);
             LLVMBuildStore(ctx.builder, LLVMGetParam(function, idx as u32), allocation);
-            ctx.identifiers.insert(n.clone(), allocation);
+            declare_symbol(&n, allocation, ctx);
         }
         generate_block(*b, ctx);
+        finalize_scope(ctx);
+        LLVMBuildUnreachable(ctx.builder);
     }
-    LLVMBuildUnreachable(ctx.builder);
 }
 
 unsafe fn generate_variable_decl(name: String, _type: Type, expr: Expr, ctx: &mut CodeGenContext) {
@@ -205,7 +253,7 @@ unsafe fn generate_variable_decl(name: String, _type: Type, expr: Expr, ctx: &mu
     let variable_name = CString::new(name.as_bytes()).unwrap();
     let allocation = LLVMBuildAlloca(ctx.builder, get_type(_type, ctx), variable_name.as_ptr() as *const _);
     let store = LLVMBuildStore(ctx.builder, initial_value, allocation);
-    ctx.identifiers.insert(name, allocation);
+    declare_symbol(&name, allocation, ctx);
 
 }
 
@@ -234,7 +282,8 @@ pub unsafe fn generate(ast: Vec<Item>) -> String {
     let module = LLVMModuleCreateWithName(b"paridae\0".as_ptr() as *const _);
     let builder = LLVMCreateBuilderInContext(llvm_context);
 
-    let mut ctx = CodeGenContext { llvm_context, module, builder, identifiers: HashMap::new() };
+    let mut global_scope = Scope { symbols: HashMap::new(), parent: 0 };
+    let mut ctx = CodeGenContext { llvm_context, module, builder, scope_arena: vec![global_scope], current_scope: 0 };
 
     for item in ast {
         generate_item(item, &mut ctx);

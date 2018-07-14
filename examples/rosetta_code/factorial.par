@@ -7,6 +7,6 @@ factorial :: (n: s32) -> s32 {
     }
 }
 
-_paridae_entry :: () -> i32 {
+_paridae_entry :: () -> s32 {
     return factorial(10);
 }

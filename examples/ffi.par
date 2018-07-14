@@ -1,0 +1,6 @@
+
+putchar :: (ch: s32) -> s32
+
+_paridae_entry :: () -> s32 {
+    putchar(65);
+}
