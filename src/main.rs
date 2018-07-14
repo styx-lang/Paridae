@@ -20,18 +20,38 @@ mod parser;
 mod codegen;
 mod type_checking;
 
-fn main() {
-    let mut file = File::open("examples/ffi.par").unwrap();
+fn parse_source_file(filename: &str) -> Vec<ast::Item> {
+    let mut file = File::open(filename).unwrap();
     let mut source = String::new();
     let _ = file.read_to_string(&mut source);
 
     let tokens = lexer::lex(source);
-    let items = parser::parse(tokens);
+    parser::parse(tokens)
+}
 
-    /*for item in &items {
-        println!("{:?}", item);
-    }*/
+fn execute_include_directives(items: Vec<ast::Item>) -> Vec<ast::Item> {
 
+    let mut resulting_items = Vec::new();
+    resulting_items.reserve(items.len());
+
+    for item in items {
+
+        if let ast::ItemKind::Directive(ast::DirectiveKind::Include(ref filename)) = item.node {
+            let mut additional_nodes = parse_source_file(filename.as_ref());
+            resulting_items.append(&mut additional_nodes);
+        } else {
+            resulting_items.push(item);
+        }
+    }
+
+    resulting_items
+}
+
+fn main() {
+
+    let mut items = parse_source_file("examples/include.par");
+
+    items = execute_include_directives(items);
 
     ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");
 

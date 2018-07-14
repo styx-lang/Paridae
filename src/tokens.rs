@@ -8,6 +8,7 @@
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TokenType {
     Identifier,
+    Directive,
     EOF,
     //Keywords
     Break,

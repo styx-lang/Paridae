@@ -18,7 +18,13 @@ pub enum ItemKind {
     ConstDecl(Type, Box<Expr>),
     FunctionDecl(Box<Signature>, Option<Box<Block>>),
     VariableDecl(Type, Box<Expr>),
+    Directive(DirectiveKind),
     TypeDecl(Type)
+}
+
+#[derive(Debug, Clone)]
+pub enum DirectiveKind {
+    Include(String),
 }
 
 #[derive(Debug, Clone)]
@@ -32,7 +38,7 @@ impl ToString for Signature {
         let mut parts = Vec::new();
         parts.push(String::from("("));
         for (t, name) in &self.inputs {
-            parts.push(format!("{} : {}", name, t.to_string()));
+            parts.push(format!("{}", name));
             parts.push(String::from(", "));
         }
         let len = parts.len();

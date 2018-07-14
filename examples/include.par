@@ -1,0 +1,13 @@
+//Includes pull the entire content of another file in a C preprocessor style.
+//This feature is only for simplifying the bootstrapping process
+//and will not exist in the actual language
+
+#include lib/cstdio.par
+
+_paridae_entry :: () -> s32 {
+    c := getchar();
+    putchar(c);
+    return 0;
+}
+
+

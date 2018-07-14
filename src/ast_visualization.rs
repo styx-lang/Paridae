@@ -93,7 +93,6 @@ fn visit_expr(expr: Expr, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> 
         Identifier(s) => visit_identifier(s, nodes),
         If(box e, box b1, b2) => visit_conditional(e, b1, b2, edges, nodes),
         Call(box e, args) => visit_call(e, args, edges, nodes),
-        _ => panic!("Other expression types not yet supported! {:?}", expr.node),
     }
 
 }
@@ -131,7 +130,6 @@ fn visit_stmt(stmt: Stmt, edges: &mut Vec<String>,  nodes: &mut Vec<String>, roo
         Empty => root,
         Continue => visit_keyword("Continue", edges, nodes),
         While(box condition, box block) => visit_while(condition, block, edges, nodes),
-        _ => panic!("Other statement types not yet supported! {:?}", stmt.node),
     };
 
     edges.push(format!("n{} -> n{};\n", root, leaf_id));
@@ -171,6 +169,12 @@ fn visit_type_decl(name: String, _type: Type, edges: &mut Vec<String>,  nodes: &
     panic!("Not yet supported!");
 }
 
+fn visit_directive(_k: DirectiveKind, nodes: &mut Vec<String>) -> usize {
+    let id = nodes.len();
+    nodes.push(format!("n{} [label=\"Directive\"];\n", id));
+    id
+}
+
 fn visit_item(item: Item, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
     use self::ItemKind::*;
 
@@ -180,6 +184,7 @@ fn visit_item(item: Item, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> 
         VariableDecl(t, box expr) => visit_variable_decl(name, t, expr, edges, nodes),
         ConstDecl(t, box expr) => visit_variable_decl(name, t, expr, edges, nodes),
         TypeDecl(t) => visit_type_decl(name, t, edges, nodes),
+        Directive(k) => visit_directive(k, nodes),
     }
 }
 

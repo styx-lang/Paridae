@@ -349,9 +349,23 @@ fn parse_function_decl(ctx: &mut ParsingContext) -> Item {
     Item {name: identifier.lexeme.unwrap(), node, line: identifier.line }
 }
 
+fn parse_directive(ctx: &mut ParsingContext) -> Item {
+
+    let token = consume(ctx);
+    let line = token.lexeme.unwrap();
+    let parts: Vec<&str> = line.split(" ").collect();
+    match parts[0] {
+        "#include" => Item { name: parts[1].to_string(), node: ItemKind::Directive(DirectiveKind::Include(parts[1].to_string())), line: token.line },
+        _ => panic!("Unknown directive {}", parts[0]),
+    }
+}
+
 fn parse_item(ctx: &mut ParsingContext) -> Item {
     use self::TokenType::*;
     let token = look_ahead(ctx, 0);
+    if token.token_type == Directive {
+        return parse_directive(ctx);
+    }
     if token.token_type != Identifier {
         panic!("Tried to parse a item starting with a {:?} on line {:?}", token.token_type, token.line);
     }

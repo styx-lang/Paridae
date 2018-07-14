@@ -320,6 +320,8 @@ fn check_variable_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext)
         panic!("Declaration of variable {} did not type check", name);
     };
 
+    declare_symbol(&name, &res_t, ctx);
+
     ItemKind::VariableDecl(res_t, box res_expr)
 }
 

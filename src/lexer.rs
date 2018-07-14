@@ -145,6 +145,14 @@ fn identifier(ctx: &mut LexingContext) {
     }
 }
 
+fn directive(ctx: &mut LexingContext) {
+    while peek(ctx) != '\n' {
+        advance(ctx);
+    }
+    let lexeme = get_lexeme(ctx);
+    add_lexeme_token(ctx, lexeme, TokenType::Directive);
+}
+
 fn scan_token(ctx: &mut LexingContext) {
     use tokens::TokenType::*;
 
@@ -178,6 +186,9 @@ fn scan_token(ctx: &mut LexingContext) {
             } else {
                 add_simple_token(ctx, Slash);
             }
+        }
+        '#' => {
+            directive(ctx);
         }
         ' ' => {}
         '\t' => {}

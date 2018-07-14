@@ -117,7 +117,6 @@ unsafe fn generate_binary_operator(bin_op: BinaryOperatorKind, left: Expr, right
         LessEq => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntSLE, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
         Greater => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntSGT, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
         GreaterEq => LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntSGE, lhs, rhs, b"cmp_tmp\0".as_ptr() as *const _),
-        _ => panic!("Other binary operators not yet supported {:?}", bin_op),
     }
 }
 
@@ -186,7 +185,6 @@ unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
         Identifier(s) => generate_identifier(s, ctx),
         Call(box fun, args) => generate_call(fun, args, ctx),
         If(box condition, box then, otherwise) => generate_condition(condition, then, otherwise, ctx),
-        _ => panic!("Other expression kinds not yet supported {:?}", expr.node),
     }
 }
 
@@ -274,6 +272,7 @@ unsafe fn generate_item(item: Item, ctx: &mut CodeGenContext) {
         VariableDecl(t, box expr) => generate_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => generate_const_decl(name, t, expr, ctx),
         TypeDecl(t) => generate_type_decl(name, t, ctx),
+        Directive(k) => panic!("ICE: Directive item should have been processed before codegen"),
     }
 }
 
