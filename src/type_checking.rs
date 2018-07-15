@@ -118,11 +118,26 @@ fn check_unary_operator(op: UnaryOperatorKind, inner: Expr, ctx: &mut TypeContex
 }
 
 fn try_implicit_cast(expr: Expr, target: Type, ctx: &mut TypeContext) -> Option<Expr> {
+    use self::ExprKind::*;
+
     if expr.t == Type::Signed(IntegerSize::Unspecified) {
-        if let ExprKind::Literal(l) = expr.node {
-            Some(Expr { node: ExprKind::Literal(l), t: target })
-        } else {
-            None
+
+        match expr.node {
+            Literal(l) => Some(Expr { node: Literal(l), t: target }),
+            Unary(op, box inner) => {
+                if let Some(i) = try_implicit_cast(inner, target.clone(), ctx) {
+                    Some(Expr { node: Unary(op, box i), t: target})
+                } else {
+                    None
+                }
+            },
+            Binary(op, box lhs, box rhs) => {
+                match (try_implicit_cast(lhs, target.clone(), ctx), try_implicit_cast(rhs, target.clone(), ctx)) {
+                    (Some(l), Some(r)) => Some(Expr { node: Binary(op, box l, box r), t: target}),
+                    _ => None
+                }
+            },
+            _ => None
         }
     } else {
         None
@@ -142,7 +157,7 @@ fn check_binary_operator(op: BinaryOperatorKind, lhs: Expr, rhs: Expr, ctx: &mut
         } else if let Some(expr) = try_implicit_cast(checked_rhs.clone(), checked_lhs.t.clone(), ctx) {
             checked_rhs = expr;
         } else {
-            panic!("Binary operations call only be done on equal types: {:?} vs {:?}", checked_lhs, checked_rhs);
+            panic!("Binary operations can only be done on equal types: {:?} vs {:?}", checked_lhs, checked_rhs);
         }
     }
 
@@ -245,6 +260,33 @@ fn check_return(expr: Expr, ctx: &mut TypeContext) -> StmtKind {
     StmtKind::Return(box checked_expr)
 }
 
+fn check_while(condition: Expr, block: Block, ctx: &mut TypeContext) -> StmtKind {
+    let checked_condition = check_expr(condition, ctx);
+
+    if checked_condition.t != Type::Bool {
+        panic!("Condition in while loop must be of boolean type");
+    }
+
+    let checked_block = check_block(block, ctx);
+
+    StmtKind::While(box checked_condition, box checked_block)
+}
+
+fn check_assignment(place: Expr, value: Expr, ctx: &mut TypeContext) -> StmtKind {
+    let checked_place = check_expr(place, ctx);
+    let mut checked_value = check_expr(value, ctx);
+
+    if checked_place.t != checked_value.t {
+        if let Some(expr) = try_implicit_cast(checked_value.clone(), checked_place.t.clone(), ctx) {
+            checked_value = expr;
+        } else {
+            panic!("Trying to assign value {:?} to place {:?}", checked_value, checked_place);
+        }
+    }
+
+    StmtKind::Assignment(box checked_place, box checked_value)
+}
+
 fn check_stmt(stmt: Stmt, ctx: &mut TypeContext) -> Stmt {
     use self::StmtKind::*;
 
@@ -257,7 +299,9 @@ fn check_stmt(stmt: Stmt, ctx: &mut TypeContext) -> Stmt {
         Expr(box e) => {
             let checked_expr = check_expr(e, ctx);
             Expr(box checked_expr)
-        }
+        },
+        While(box condition, box block) => check_while(condition, block, ctx),
+        Assignment(box place, box value) => check_assignment(place, value, ctx),
         _ => panic!("Other statement kinds not yet supported {:?}")
     };
 
@@ -310,10 +354,17 @@ fn check_function_decl(name: String, sig: Signature, block: Option<Box<Block>>, 
 fn check_variable_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext) -> ItemKind {
     use self::Type::*;
 
-    let res_expr = check_expr(expr, ctx);
+    let mut res_expr = check_expr(expr, ctx);
 
     let res_t = if let Unchecked(s) = t {
-        primitive_type_by_name(&s)
+        let _t = primitive_type_by_name(&s);
+        //TODO Find some robust inference method
+        res_expr = if let Some(e) = try_implicit_cast(res_expr.clone(), _t.clone(), ctx) {
+            e
+        } else {
+           panic!("Declared type {:?} of variable {} does not match right hand {:?}", s, name, res_expr.t);
+        };
+        _t
     } else if t == Infer {
         res_expr.t.clone()
     } else {

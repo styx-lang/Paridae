@@ -49,7 +49,7 @@ fn execute_include_directives(items: Vec<ast::Item>) -> Vec<ast::Item> {
 
 fn main() {
 
-    let mut items = parse_source_file("examples/include.par");
+    let mut items = parse_source_file("examples/while.par");
 
     items = execute_include_directives(items);
 

@@ -241,8 +241,7 @@ fn parse_const_decl(ctx: &mut ParsingContext) -> Item {
     panic!("Not yet implemented");
 }
 
-fn parse_assignment(ctx: &mut ParsingContext) -> Stmt {
-    let place = parse_expression(ctx, 0);
+fn parse_assignment(place: Expr, ctx: &mut ParsingContext) -> Stmt {
     expect(ctx, TokenType::Equal);
     let value = parse_expression(ctx, 0);
     Stmt { node: StmtKind::Assignment(box place, box value) }
@@ -250,6 +249,8 @@ fn parse_assignment(ctx: &mut ParsingContext) -> Stmt {
 
 fn parse_stmt(ctx: &mut ParsingContext) -> Stmt {
     use self::TokenType::*;
+
+    let mut semicolon_exception = false;
 
     let result = if accept(ctx, Break) {
         Stmt { node: StmtKind::Break }
@@ -264,6 +265,7 @@ fn parse_stmt(ctx: &mut ParsingContext) -> Stmt {
     } else if accept(ctx, While) {
         let expr = parse_expression(ctx, 0);
         let block = parse_block(ctx);
+        semicolon_exception = true;
         Stmt { node: StmtKind::While(box expr, box block) }
     } else if accept(ctx, Semicolon) {
         Stmt { node: StmtKind::Empty }
@@ -275,7 +277,7 @@ fn parse_stmt(ctx: &mut ParsingContext) -> Stmt {
             let left = parse_expression(ctx, 0);
             let next = look_ahead(ctx, 0);
             if next.token_type == Equal {
-                parse_assignment(ctx)
+                parse_assignment(left, ctx)
             } else if next.token_type == Semicolon || next.token_type == RightCurly {
                 Stmt { node: StmtKind::Expr(box left) }
             } else {
@@ -283,7 +285,7 @@ fn parse_stmt(ctx: &mut ParsingContext) -> Stmt {
             }
         }
     };
-    if look_ahead(ctx, 0).token_type != RightCurly {
+    if !semicolon_exception && look_ahead(ctx, 0).token_type != RightCurly {
         expect(ctx, Semicolon);
     }
     result

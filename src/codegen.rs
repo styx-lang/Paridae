@@ -193,6 +193,37 @@ unsafe fn generate_return(e: Expr, ctx: &mut CodeGenContext) {
     LLVMBuildRet(ctx.builder, v);
 }
 
+unsafe fn generate_while(condition: Expr, block: Block, ctx: &mut CodeGenContext) {
+    let parent_function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder));
+    let mut condition_bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, parent_function, b"loop_condition\0".as_ptr() as *const _);
+    let mut action_bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, parent_function, b"loop_action\0".as_ptr() as *const _);
+    let mut done_bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, parent_function, b"loop_done\0".as_ptr() as *const _);
+    LLVMBuildBr(ctx.builder, condition_bb);
+    LLVMPositionBuilderAtEnd(ctx.builder, condition_bb);
+    let condition_value = generate_expr(condition, ctx);
+    let bot = LLVMConstInt(LLVMInt1TypeInContext(ctx.llvm_context), 0, 0);
+    let branch_flag = LLVMBuildICmp(ctx.builder, LLVMIntPredicate::LLVMIntNE, condition_value, bot,b"whilecond\0".as_ptr() as *const _);
+    LLVMBuildCondBr(ctx.builder, branch_flag, action_bb, done_bb);
+    LLVMPositionBuilderAtEnd(ctx.builder, action_bb);
+    initialize_scope(ctx);
+    generate_block(block, ctx);
+    finalize_scope(ctx);
+    LLVMBuildBr(ctx.builder, condition_bb);
+    LLVMPositionBuilderAtEnd(ctx.builder, done_bb);
+
+
+}
+
+unsafe fn generate_assignment(place: Expr, value: Expr, ctx: &mut CodeGenContext) {
+    let res_val = generate_expr(value, ctx);
+    if let ExprKind::Identifier(ident) = place.node {
+        let place_ptr = lookup_symbol(&ident, ctx);
+        LLVMBuildStore(ctx.builder, res_val, place_ptr);
+    } else {
+        panic!("Currently only supports assigning to identifiers");
+    }
+}
+
 unsafe fn generate_stmt(stmt: Stmt, ctx: &mut CodeGenContext) {
     use self::StmtKind::*;
 
@@ -202,6 +233,8 @@ unsafe fn generate_stmt(stmt: Stmt, ctx: &mut CodeGenContext) {
         Expr(box e) => {
             let _ = generate_expr(e, ctx);
         },
+        While(box c, box b) => generate_while(c, b, ctx),
+        Assignment(box place, box value) => generate_assignment(place, value, ctx),
         _ => panic!("Other statement kinds not yet supported {:?}", stmt.node),
     }
 }

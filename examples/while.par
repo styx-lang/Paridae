@@ -1,0 +1,10 @@
+#include lib/cstdio.par
+
+_paridae_entry :: () -> s32 {
+    c : s32 = 65;
+    while c < 65+26 {
+        putchar(c);
+        c = c + 1;
+    }
+    return 0;
+}

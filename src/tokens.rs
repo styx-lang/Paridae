@@ -83,6 +83,7 @@ pub fn is_keyword(s: &str) -> Option<TokenType> {
         "return" => Some(Return),
         "struct" => Some(Struct),
         "true" => Some(True),
+        "while" => Some(While),
         _ => None
     }
 }
