@@ -74,6 +74,10 @@ unsafe fn get_type(t: Type, ctx: &CodeGenContext) -> LLVMTypeRef {
         Signed(Arch) | Unsigned(Arch) => LLVMInt64TypeInContext(ctx.llvm_context),
         Float(F32) => LLVMFloatTypeInContext(ctx.llvm_context),
         Float(F64) => LLVMDoubleTypeInContext(ctx.llvm_context),
+        Ptr(box inner) => {
+            let llvm_inner = get_type(inner, ctx);
+            LLVMPointerType(llvm_inner, 0)
+        }
         other => panic!("CodeGen does not support {:?} yet", other),
    }
 }
@@ -92,19 +96,36 @@ unsafe fn generate_literal(lit: LitKind, t: Type, ctx: &CodeGenContext) -> LLVMV
 }
 
 unsafe fn generate_identifier(ident: String, ctx: &CodeGenContext) -> LLVMValueRef {
-    let ptr = lookup_symbol(&ident, ctx);
-    LLVMBuildLoad(ctx.builder, ptr, ident.as_bytes().as_ptr() as *const _)
+    lookup_symbol(&ident, ctx)
 }
 
 unsafe fn generate_unary_operator(op: UnaryOperatorKind, inner: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
-    panic!("Not yet implemented");
+    let inner_val = generate_expr(inner.clone(), ctx);
+    match op {
+        UnaryOperatorKind::Deref => {
+            LLVMBuildLoad(ctx.builder, inner_val, b"ptr_deref_tmp\0".as_ptr() as *const _)
+        },
+        UnaryOperatorKind::Refer => {
+            inner_val
+        },
+        _ => panic!("Unary operator {:?} not yet implemented", op),
+    }
 }
 
 unsafe fn generate_binary_operator(bin_op: BinaryOperatorKind, left: Expr, right: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
     use self::BinaryOperatorKind::*;
 
-    let lhs = generate_expr(left, ctx);
-    let rhs = generate_expr(right, ctx);
+    let mut lhs = generate_expr(left, ctx);
+    let mut rhs = generate_expr(right, ctx);
+
+    if LLVMGetTypeKind(LLVMTypeOf(lhs)) == LLVMTypeKind::LLVMPointerTypeKind {
+        lhs = LLVMBuildLoad(ctx.builder, lhs, b"ptr_tmp\0".as_ptr() as *const _);
+    }
+
+    if LLVMGetTypeKind(LLVMTypeOf(rhs)) == LLVMTypeKind::LLVMPointerTypeKind {
+        rhs = LLVMBuildLoad(ctx.builder, rhs, b"ptr_tmp\0".as_ptr() as *const _);
+    }
+
 
     match bin_op {
         Addition => LLVMBuildAdd(ctx.builder, lhs, rhs, b"add_tmp\0".as_ptr() as *const _),
@@ -127,6 +148,9 @@ unsafe fn generate_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &mut CodeGenContex
         panic!("Higher order functions not yet supported!");
     };
     let function = LLVMGetNamedFunction(ctx.module, name.as_bytes().as_ptr() as *const _); //name.as_bytes()
+    if function as usize == 0x0 {
+        panic!("Failed to find function {}", name);
+    }
     let expected_count = LLVMCountParams(function) as usize;
     if args.len() != expected_count {
         panic!("Expected {} arguments in function call to {} but got {}", expected_count, name, args.len());
@@ -134,10 +158,14 @@ unsafe fn generate_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &mut CodeGenContex
     let mut arg_values = Vec::new();
 
     for box arg in args {
-        arg_values.push(generate_expr(arg, ctx));
+        let mut val = generate_expr(arg, ctx);
+        if LLVMGetTypeKind(LLVMTypeOf(val)) == LLVMTypeKind::LLVMPointerTypeKind {
+            val = LLVMBuildLoad(ctx.builder, val, b"ptr_tmp\0".as_ptr() as *const _);
+        }
+        arg_values.push(val);
     }
 
-    let res = LLVMBuildCall(ctx.builder, function, arg_values.as_mut_ptr(), arg_values.len() as u32, b"calltemp\0".as_ptr() as *const _);
+    let res = LLVMBuildCall(ctx.builder, function, arg_values.as_mut_ptr(), arg_values.len() as u32, b"call_tmp\0".as_ptr() as *const _);
     res
 }
 
@@ -189,8 +217,11 @@ unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
 }
 
 unsafe fn generate_return(e: Expr, ctx: &mut CodeGenContext) {
-    let v = generate_expr(e, ctx);
-    LLVMBuildRet(ctx.builder, v);
+    let mut val = generate_expr(e, ctx);
+    if LLVMGetTypeKind(LLVMTypeOf(val)) == LLVMTypeKind::LLVMPointerTypeKind {
+            val = LLVMBuildLoad(ctx.builder, val, b"ptr_tmp\0".as_ptr() as *const _);
+        }
+    LLVMBuildRet(ctx.builder, val);
 }
 
 unsafe fn generate_while(condition: Expr, block: Block, ctx: &mut CodeGenContext) {
@@ -215,12 +246,23 @@ unsafe fn generate_while(condition: Expr, block: Block, ctx: &mut CodeGenContext
 }
 
 unsafe fn generate_assignment(place: Expr, value: Expr, ctx: &mut CodeGenContext) {
-    let res_val = generate_expr(value, ctx);
-    if let ExprKind::Identifier(ident) = place.node {
-        let place_ptr = lookup_symbol(&ident, ctx);
-        LLVMBuildStore(ctx.builder, res_val, place_ptr);
-    } else {
-        panic!("Currently only supports assigning to identifiers");
+    let mut res_val = generate_expr(value, ctx);
+
+    match place.node {
+        ExprKind::Identifier(ident) => {
+            let place_ptr = lookup_symbol(&ident, ctx);
+            LLVMBuildStore(ctx.builder, res_val, place_ptr);
+        },
+        ExprKind::Unary(UnaryOperatorKind::Deref, box inner) => {
+            if let ExprKind::Identifier(ident) = inner.node {
+                let place_ptr = lookup_symbol(&ident, ctx);
+                let place_tmp = LLVMBuildLoad(ctx.builder, place_ptr, b"ptr_tmp\0".as_ptr() as *const _);
+                LLVMBuildStore(ctx.builder, res_val, place_tmp);
+            } else {
+                panic!("Can only assign to simple pointers for now {:?}", inner);
+            }
+        },
+        _ => panic!("Currently does not supports assigning to place {:?}", place),
     }
 }
 
@@ -261,7 +303,6 @@ unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box
     let function_name = CString::new(name.as_bytes()).unwrap();
     let function = LLVMAddFunction(ctx.module, function_name.as_ptr() as *const _,
                                                    function_type);
-
     if let Some(b) = block {
         initialize_scope(ctx);
         let bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, function, b"entry\0".as_ptr() as *const _);
@@ -279,10 +320,19 @@ unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box
 }
 
 unsafe fn generate_variable_decl(name: String, _type: Type, expr: Expr, ctx: &mut CodeGenContext) {
-    let initial_value = generate_expr(expr, ctx);
-
     let variable_name = CString::new(name.as_bytes()).unwrap();
-    let allocation = LLVMBuildAlloca(ctx.builder, get_type(_type, ctx), variable_name.as_ptr() as *const _);
+    let allocation = LLVMBuildAlloca(ctx.builder, get_type(_type.clone(), ctx), variable_name.as_ptr() as *const _);
+
+    let mut initial_value = generate_expr(expr, ctx);
+    match _type {
+        Type::Ptr(_) => {},
+        _ => {
+            if LLVMGetTypeKind(LLVMTypeOf(initial_value)) == LLVMTypeKind::LLVMPointerTypeKind {
+                initial_value = LLVMBuildLoad(ctx.builder, initial_value, b"ptr_tmp\0".as_ptr() as *const _);
+            }
+        }
+    }
+
     let store = LLVMBuildStore(ctx.builder, initial_value, allocation);
     declare_symbol(&name, allocation, ctx);
 
@@ -292,7 +342,7 @@ unsafe fn generate_const_decl(name: String, _type: Type, expr: Expr, ctx: &CodeG
     panic!("Not yet implemented");
 }
 
-unsafe fn generate_type_decl(name: String, _type: Type, ctx: &CodeGenContext) {
+unsafe fn generate_struct_decl(name: String, _type: Type, ctx: &CodeGenContext) {
     panic!("Not yet implemented");
 }
 
@@ -304,7 +354,7 @@ unsafe fn generate_item(item: Item, ctx: &mut CodeGenContext) {
         FunctionDecl(box sig, block) => generate_function_decl(name, sig, block, ctx),
         VariableDecl(t, box expr) => generate_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => generate_const_decl(name, t, expr, ctx),
-        TypeDecl(t) => generate_type_decl(name, t, ctx),
+        StructDecl(t) => generate_struct_decl(name, t, ctx),
         Directive(k) => panic!("ICE: Directive item should have been processed before codegen"),
     }
 }

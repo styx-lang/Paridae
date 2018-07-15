@@ -1,0 +1,13 @@
+
+ptr :: (p: *s32) -> s32 {
+    x : s32 = *p;
+    *p = x*2;
+    return x;
+}
+
+_paridae_entry :: () -> s32 {
+    v : s32 = 42;
+    p : *s32 = &v;
+    result : s32 = ptr(p);
+    return result + v;
+}

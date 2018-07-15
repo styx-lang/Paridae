@@ -19,7 +19,7 @@ pub enum ItemKind {
     FunctionDecl(Box<Signature>, Option<Box<Block>>),
     VariableDecl(Type, Box<Expr>),
     Directive(DirectiveKind),
-    TypeDecl(Type)
+    StructDecl(Type)
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +106,6 @@ pub enum Type {
     Ptr(Box<Type>),
     Void,
     Function(Vec<Type>, Box<Type>),
-    Unchecked(String),
     Infer,
 }
 
@@ -118,7 +117,13 @@ impl ToString for Type {
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOperatorKind {
+    // The "*" operator for dereferencing pointers
+    Deref,
+    // The "&" operator for getting the address of a place
+    Refer,
+    //The numerical negation "-"
     Negation,
+    //The logical not operation "!"
     Complement,
 }
 

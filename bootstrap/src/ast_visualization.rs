@@ -165,7 +165,7 @@ fn visit_const_decl(name: String, _type: Type, expr: Expr, edges: &mut Vec<Strin
     panic!("Not yet supported!");
 }
 
-fn visit_type_decl(name: String, _type: Type, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
+fn visit_struct_decl(name: String, _type: Type, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> usize {
     panic!("Not yet supported!");
 }
 
@@ -183,7 +183,7 @@ fn visit_item(item: Item, edges: &mut Vec<String>,  nodes: &mut Vec<String>) -> 
         FunctionDecl(box sig, block) => visit_function_decl(name, sig, block, edges, nodes),
         VariableDecl(t, box expr) => visit_variable_decl(name, t, expr, edges, nodes),
         ConstDecl(t, box expr) => visit_variable_decl(name, t, expr, edges, nodes),
-        TypeDecl(t) => visit_type_decl(name, t, edges, nodes),
+        StructDecl(t) => visit_struct_decl(name, t, edges, nodes),
         Directive(k) => visit_directive(k, nodes),
     }
 }

@@ -11,6 +11,8 @@ extern crate llvm_sys as llvm;
 use std::fs::File;
 use std::io::Write;
 use std::io::prelude::*;
+use std::env;
+use std::path::Path;
 
 mod lexer;
 mod tokens;
@@ -49,11 +51,13 @@ fn execute_include_directives(items: Vec<ast::Item>) -> Vec<ast::Item> {
 
 fn main() {
 
+    let _ = env::set_current_dir(&Path::new(".."));
+
     let mut items = parse_source_file("examples/while.par");
 
     items = execute_include_directives(items);
 
-    ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");
+    //ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");
 
     let typed_items = type_checking::check(items);
 

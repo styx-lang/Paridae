@@ -59,40 +59,6 @@ fn get_current_return_type(ctx: &mut TypeContext) -> Type {
     ctx.scope_arena[ctx.current].current_return_type.clone()
 }
 
-fn primitive_type_by_name(name: &String) -> Type {
-    use self::Type::*;
-
-    match name.as_ref() {
-        "int" => Signed(IntegerSize::Unspecified),
-        "float" => Float(FloatingSize::Unspecified),
-        "s8" => Signed(IntegerSize::I8),
-        "s16" => Signed(IntegerSize::I16),
-        "s32" => Signed(IntegerSize::I32),
-        "s64" => Signed(IntegerSize::I64),
-        "u8" => Unsigned(IntegerSize::I8),
-        "u16" => Unsigned(IntegerSize::I16),
-        "u32" => Unsigned(IntegerSize::I32),
-        "u64" => Unsigned(IntegerSize::I64),
-        "bool" => Bool,
-        "char" => Char,
-        "void" => Void,
-        _ => panic!("{} is not a primitive type", name),
-    }
-}
-
-fn type_by_name(name: &String) -> Type {
-    primitive_type_by_name(name)
-}
-
-fn check_type(t: Type) -> Type {
-    if let Type::Unchecked(s) = t {
-        type_by_name(&s)
-    } else if t == Type::Void {
-        Type::Void
-    } else {
-        panic!("ICE: Missing type information for {:?}", t);
-    }
-}
 
 fn check_unary_operator(op: UnaryOperatorKind, inner: Expr, ctx: &mut TypeContext) -> Expr {
 
@@ -107,12 +73,21 @@ fn check_unary_operator(op: UnaryOperatorKind, inner: Expr, ctx: &mut TypeContex
                     Expr { node: ExprKind::Unary(op, box checked_inner), t: _type},
                 other => panic!("Unary negation can only be done on numeric types and not on {:?}", other),
             }
-        }
+        },
         UnaryOperatorKind::Complement => {
             match _type {
                 Type::Bool => Expr { node: ExprKind::Unary(op, box checked_inner), t: Type::Bool},
                 other => panic!("Unary complement can only be done on boolean types and not on {:?}", other),
             }
+        },
+        UnaryOperatorKind::Deref => {
+            match _type {
+                Type::Ptr(box inner_type) => Expr { node: ExprKind::Unary(op, box checked_inner), t: inner_type },
+                other => panic!("Cannot dereference non-pointer type {:?}", other),
+            }
+        },
+        UnaryOperatorKind::Refer => {
+            Expr { node: ExprKind::Unary(op, box checked_inner), t: Type::Ptr(box _type) }
         }
     }
 }
@@ -240,7 +215,6 @@ fn check_expr(expr: Expr, ctx: &mut TypeContext) -> Expr {
         Identifier(s) => check_identifier(s, ctx),
         Call(box fun, args) => check_call(fun, args, ctx),
         If(box condition, box then, otherwise) => check_condition(condition, then, otherwise, ctx),
-        _ => panic!("Other expressions kinds not yet supported {:?}", expr.node),
     }
 }
 
@@ -324,20 +298,18 @@ fn check_function_decl(name: String, sig: Signature, block: Option<Box<Block>>, 
     let mut argument_types = Vec::new();
 
     for (t, n) in sig.inputs {
-        let res_t = check_type(t);
-        if res_t == Type::Void {
+        if t == Type::Void {
             panic!("Parameter {} in signature of function {} cannot be void", n, name);
         }
-        argument_types.push(res_t.clone());
-        checked_inputs.push((res_t, n));
+        argument_types.push(t.clone());
+        checked_inputs.push((t, n));
     }
-    let checked_output = check_type(sig.output);
 
-    declare_symbol(&name, &Type::Function(argument_types, box checked_output.clone()), ctx);
+    declare_symbol(&name, &Type::Function(argument_types, box sig.output.clone()), ctx);
 
     let checked_block = if let Some(box b) = block {
 
-        initialize_scope( checked_output.clone(), ctx);
+        initialize_scope( sig.output.clone(), ctx);
         for (param_type, param_name) in &checked_inputs {
             declare_symbol(param_name, param_type, ctx);
         }
@@ -348,7 +320,7 @@ fn check_function_decl(name: String, sig: Signature, block: Option<Box<Block>>, 
         None
     };
 
-    ItemKind::FunctionDecl(box Signature {inputs: checked_inputs, output: checked_output}, checked_block)
+    ItemKind::FunctionDecl(box Signature {inputs: checked_inputs, output: sig.output}, checked_block)
 }
 
 fn check_variable_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext) -> ItemKind {
@@ -356,24 +328,21 @@ fn check_variable_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext)
 
     let mut res_expr = check_expr(expr, ctx);
 
-    let res_t = if let Unchecked(s) = t {
-        let _t = primitive_type_by_name(&s);
-        //TODO Find some robust inference method
-        res_expr = if let Some(e) = try_implicit_cast(res_expr.clone(), _t.clone(), ctx) {
+    if t == Infer {
+        panic!("Type inference not yet operational. See variable {} ", name);
+    }
+
+    if t != res_expr.t {
+        res_expr = if let Some(e) = try_implicit_cast(res_expr.clone(), t.clone(), ctx) {
             e
         } else {
-           panic!("Declared type {:?} of variable {} does not match right hand {:?}", s, name, res_expr.t);
+            panic!("Declared type {:?} of variable {} does not match right hand {:?}", t, name, res_expr);
         };
-        _t
-    } else if t == Infer {
-        res_expr.t.clone()
-    } else {
-        panic!("Declaration of variable {} did not type check", name);
-    };
+    }
 
-    declare_symbol(&name, &res_t, ctx);
+    declare_symbol(&name, &t, ctx);
 
-    ItemKind::VariableDecl(res_t, box res_expr)
+    ItemKind::VariableDecl(t, box res_expr)
 }
 
 fn check_const_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext) -> ItemKind {

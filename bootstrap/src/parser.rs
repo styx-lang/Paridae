@@ -104,6 +104,8 @@ fn parse_prefix_operator(ctx: &mut ParsingContext, token: Token) -> Expr {
     let operation = match token.token_type {
         Minus => UnaryOperatorKind::Negation,
         Bang => UnaryOperatorKind::Complement,
+        And => UnaryOperatorKind::Refer,
+        Star => UnaryOperatorKind::Deref,
         _ => panic!("{:?} is not a valid prefix operator!", token.token_type),
     };
 
@@ -194,7 +196,7 @@ fn parse_expression(ctx: &mut ParsingContext, precedence: u32) -> Expr {
         Integer => parse_integer_literal(ctx, token.clone()),
         TokenType::String => parse_string_literal(ctx, token.clone()),
         Float => parse_float_literal(ctx, token.clone()),
-        Minus | Bang => parse_prefix_operator(ctx, token.clone()),
+        Minus | Bang | And | Star => parse_prefix_operator(ctx, token.clone()),
         LeftParen => {
             let inner = parse_expression(ctx, 0);
             expect(ctx, RightParen);
@@ -213,10 +215,34 @@ fn parse_expression(ctx: &mut ParsingContext, precedence: u32) -> Expr {
 
 }
 
+fn primitive_type_by_name(name: &String) -> Type {
+    use self::Type::*;
+
+    match name.as_ref() {
+        "int" => Signed(IntegerSize::Unspecified),
+        "float" => Float(FloatingSize::Unspecified),
+        "s8" => Signed(IntegerSize::I8),
+        "s16" => Signed(IntegerSize::I16),
+        "s32" => Signed(IntegerSize::I32),
+        "s64" => Signed(IntegerSize::I64),
+        "u8" => Unsigned(IntegerSize::I8),
+        "u16" => Unsigned(IntegerSize::I16),
+        "u32" => Unsigned(IntegerSize::I32),
+        "u64" => Unsigned(IntegerSize::I64),
+        "bool" => Bool,
+        "char" => Char,
+        "void" => Void,
+        _ => panic!("{} is not a primitive type", name),
+    }
+}
+
 fn parse_type(ctx: &mut ParsingContext) -> Type {
     let token = consume(ctx);
     if token.token_type == TokenType::Identifier {
-        Type::Unchecked(token.lexeme.unwrap())
+        primitive_type_by_name(&token.lexeme.unwrap())
+    } else if token.token_type == TokenType::Star {
+        let inner = parse_type(ctx);
+        Type::Ptr(box inner)
     } else {
         panic!("Expected type but got {:?} on line {:?}", token.token_type, token.line);
     }
