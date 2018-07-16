@@ -17,12 +17,18 @@ struct Scope {
     parent: usize
 }
 
+struct AdtDef {
+    fields: Vec<(String, Type)>,
+    type_ref: LLVMTypeRef
+}
+
 struct CodeGenContext {
     llvm_context: LLVMContextRef,
     module: LLVMModuleRef,
     builder: LLVMBuilderRef,
     current_scope: usize,
-    scope_arena: Vec<Scope>
+    scope_arena: Vec<Scope>,
+    types: HashMap<String, AdtDef>
 }
 
 fn initialize_scope(ctx: &mut CodeGenContext) {
@@ -78,7 +84,14 @@ unsafe fn get_type(t: Type, ctx: &CodeGenContext) -> LLVMTypeRef {
             let llvm_inner = get_type(inner, ctx);
             LLVMPointerType(llvm_inner, 0)
         }
-        other => panic!("CodeGen does not support {:?} yet", other),
+        Struct(name, _) => {
+            if let Some(adt) = ctx.types.get(&name) {
+                adt.type_ref
+            } else {
+                panic!("Unknown struct type {:?}", name)
+            }
+        },
+        other => panic!("CodeGen does not support {:?} yet", other)
    }
 }
 
@@ -158,15 +171,23 @@ unsafe fn generate_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &mut CodeGenContex
     let mut arg_values = Vec::new();
 
     for box arg in args {
+        let is_pointer = if let Type::Ptr(_) = arg.t.clone() {
+            true
+        } else {
+            false
+        };
         let mut val = generate_expr(arg, ctx);
-        if LLVMGetTypeKind(LLVMTypeOf(val)) == LLVMTypeKind::LLVMPointerTypeKind {
+        if !is_pointer && LLVMGetTypeKind(LLVMTypeOf(val)) == LLVMTypeKind::LLVMPointerTypeKind {
             val = LLVMBuildLoad(ctx.builder, val, b"ptr_tmp\0".as_ptr() as *const _);
         }
         arg_values.push(val);
     }
 
-    let res = LLVMBuildCall(ctx.builder, function, arg_values.as_mut_ptr(), arg_values.len() as u32, b"call_tmp\0".as_ptr() as *const _);
-    res
+    if LLVMGetTypeKind(LLVMGetReturnType(LLVMGetReturnType(LLVMTypeOf(function)))) == LLVMTypeKind::LLVMVoidTypeKind{
+        LLVMBuildCall(ctx.builder, function, arg_values.as_mut_ptr(), arg_values.len() as u32, b"\0".as_ptr() as *const _)
+    } else {
+        LLVMBuildCall(ctx.builder, function, arg_values.as_mut_ptr(), arg_values.len() as u32, b"call_tmp\0".as_ptr() as *const _)
+    }
 }
 
 unsafe fn generate_condition(condition: Expr, then: Block, otherwise: Option<Box<Block>>, ctx: &mut CodeGenContext) -> LLVMValueRef {
@@ -203,6 +224,42 @@ unsafe fn generate_condition(condition: Expr, then: Block, otherwise: Option<Box
     }
 }
 
+unsafe fn determine_field_index(field_name: &String, struct_type: Type) -> u32 {
+    if let Type::Struct(struct_name, fields) = struct_type {
+        for (idx, (n, _)) in fields.iter().enumerate() {
+            if n == field_name {
+                return idx as u32;
+            }
+        }
+        panic!("ICE: Failed to find field {} in type {:?}", field_name, struct_name);
+    } else {
+        panic!("ICE: Tried to generate field access on type {:?}", struct_type);
+    }
+}
+
+
+unsafe fn generate_gep(owner: Expr, field_name: String, ctx: &mut CodeGenContext) -> LLVMValueRef {
+    let owner_type = owner.t.clone();
+
+    let mut base_ptr = generate_expr(owner, ctx);
+
+    let idx = if let Type::Ptr(box inner) = owner_type {
+        base_ptr = LLVMBuildLoad(ctx.builder, base_ptr, b"struct_ptr_deref\0".as_ptr() as *const _);
+        determine_field_index(&field_name, inner)
+    } else {
+        determine_field_index(&field_name, owner_type)
+    };
+
+    LLVMBuildStructGEP(ctx.builder, base_ptr, idx, field_name.as_bytes().as_ptr() as *const _)
+}
+
+unsafe fn generate_field_access(owner: Expr, field_name: String, ctx: &mut CodeGenContext) -> LLVMValueRef {
+
+    let ptr = generate_gep(owner, field_name.clone(), ctx);
+
+    LLVMBuildLoad(ctx.builder, ptr, field_name.as_bytes().as_ptr() as *const _)
+}
+
 unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
     use self::ExprKind::*;
     
@@ -213,6 +270,7 @@ unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
         Identifier(s) => generate_identifier(s, ctx),
         Call(box fun, args) => generate_call(fun, args, ctx),
         If(box condition, box then, otherwise) => generate_condition(condition, then, otherwise, ctx),
+        Member(box owner, field_name) => generate_field_access(owner, field_name, ctx),
     }
 }
 
@@ -246,7 +304,7 @@ unsafe fn generate_while(condition: Expr, block: Block, ctx: &mut CodeGenContext
 }
 
 unsafe fn generate_assignment(place: Expr, value: Expr, ctx: &mut CodeGenContext) {
-    let mut res_val = generate_expr(value, ctx);
+    let res_val = generate_expr(value, ctx);
 
     match place.node {
         ExprKind::Identifier(ident) => {
@@ -262,6 +320,11 @@ unsafe fn generate_assignment(place: Expr, value: Expr, ctx: &mut CodeGenContext
                 panic!("Can only assign to simple pointers for now {:?}", inner);
             }
         },
+        ExprKind::Member(box owner, field_name) => {
+
+            let ptr = generate_gep(owner, field_name.clone(), ctx);
+            LLVMBuildStore(ctx.builder, res_val, ptr);
+        }
         _ => panic!("Currently does not supports assigning to place {:?}", place),
     }
 }
@@ -319,21 +382,24 @@ unsafe fn generate_function_decl(name: String, sig: Signature, block: Option<Box
     }
 }
 
-unsafe fn generate_variable_decl(name: String, _type: Type, expr: Expr, ctx: &mut CodeGenContext) {
+unsafe fn generate_variable_decl(name: String, _type: Type, expr: Option<Box<Expr>>, ctx: &mut CodeGenContext) {
     let variable_name = CString::new(name.as_bytes()).unwrap();
     let allocation = LLVMBuildAlloca(ctx.builder, get_type(_type.clone(), ctx), variable_name.as_ptr() as *const _);
 
-    let mut initial_value = generate_expr(expr, ctx);
-    match _type {
-        Type::Ptr(_) => {},
-        _ => {
-            if LLVMGetTypeKind(LLVMTypeOf(initial_value)) == LLVMTypeKind::LLVMPointerTypeKind {
-                initial_value = LLVMBuildLoad(ctx.builder, initial_value, b"ptr_tmp\0".as_ptr() as *const _);
+    if let Some(box e) = expr {
+        let mut initial_value = generate_expr(e, ctx);
+        match _type {
+            Type::Ptr(_) => {},
+            _ => {
+                if LLVMGetTypeKind(LLVMTypeOf(initial_value)) == LLVMTypeKind::LLVMPointerTypeKind {
+                    initial_value = LLVMBuildLoad(ctx.builder, initial_value, b"ptr_tmp\0".as_ptr() as *const _);
+                }
             }
         }
+
+        let store = LLVMBuildStore(ctx.builder, initial_value, allocation);
     }
 
-    let store = LLVMBuildStore(ctx.builder, initial_value, allocation);
     declare_symbol(&name, allocation, ctx);
 
 }
@@ -342,8 +408,18 @@ unsafe fn generate_const_decl(name: String, _type: Type, expr: Expr, ctx: &CodeG
     panic!("Not yet implemented");
 }
 
-unsafe fn generate_struct_decl(name: String, _type: Type, ctx: &CodeGenContext) {
-    panic!("Not yet implemented");
+unsafe fn generate_struct_decl(name: String, _type: Type, ctx: &mut CodeGenContext) {
+    let type_ref = LLVMStructCreateNamed(ctx.llvm_context, name.as_bytes().as_ptr() as *const _);
+    let mut llvm_fields = Vec::new();
+    if let Type::Struct(_, fields) = _type {
+        for (_, field_type) in &fields {
+            llvm_fields.push(get_type(field_type.clone(), ctx));
+        }
+        LLVMStructSetBody(type_ref, llvm_fields.as_mut_ptr(), llvm_fields.len() as u32, 0);
+        ctx.types.insert(name, AdtDef { fields, type_ref});
+    } else {
+        panic!("ICE: Passed non-struct type decl to 'generate_struct_decl'");
+    }
 }
 
 unsafe fn generate_item(item: Item, ctx: &mut CodeGenContext) {
@@ -352,10 +428,10 @@ unsafe fn generate_item(item: Item, ctx: &mut CodeGenContext) {
     let name = item.name.clone();
     match item.node {
         FunctionDecl(box sig, block) => generate_function_decl(name, sig, block, ctx),
-        VariableDecl(t, box expr) => generate_variable_decl(name, t, expr, ctx),
+        VariableDecl(t, expr) => generate_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => generate_const_decl(name, t, expr, ctx),
         StructDecl(t) => generate_struct_decl(name, t, ctx),
-        Directive(k) => panic!("ICE: Directive item should have been processed before codegen"),
+        Directive(_) => panic!("ICE: Directive item should have been processed before codegen"),
     }
 }
 
@@ -365,7 +441,7 @@ pub unsafe fn generate(ast: Vec<Item>) -> String {
     let builder = LLVMCreateBuilderInContext(llvm_context);
 
     let mut global_scope = Scope { symbols: HashMap::new(), parent: 0 };
-    let mut ctx = CodeGenContext { llvm_context, module, builder, scope_arena: vec![global_scope], current_scope: 0 };
+    let mut ctx = CodeGenContext { llvm_context, module, builder, scope_arena: vec![global_scope], current_scope: 0 , types: HashMap::new()};
 
     for item in ast {
         generate_item(item, &mut ctx);

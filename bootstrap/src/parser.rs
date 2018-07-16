@@ -8,9 +8,12 @@
 use tokens::*;
 use ast::*;
 
+use std::collections::HashMap;
+
 struct ParsingContext {
     current: usize,
     tokens: Vec<Token>,
+    types: HashMap<String, Type>,
 }
 
 fn is_done(ctx: &mut ParsingContext) -> bool {
@@ -139,12 +142,25 @@ fn parse_binary_operator(ctx: &mut ParsingContext, left: Expr, operator: BinaryO
     Expr{ node: ExprKind::Binary(operator, Box::new(left), Box::new(right)), t: Type::Infer }
 }
 
+
+fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
+    let field_token = consume(ctx);
+    if field_token.token_type != TokenType::Identifier {
+        panic!("Token {:?} is not a valid struct field", field_token);
+    }
+    let field_name = field_token.lexeme.unwrap();
+
+    Expr { node: ExprKind::Member(box left, field_name), t: Type::Infer }
+}
+
 fn parse_infix_operator(ctx: &mut ParsingContext, left: Expr, token: Token) -> Expr {
     use self::TokenType::*;
 
     if token.token_type == LeftParen {
         parse_call(ctx, left)
-    } else if let Some(operator) = convert_token_to_binary_operator(token.token_type) {
+    } else if token.token_type == Dot {
+        parse_member_access(ctx, left)
+    }else if let Some(operator) = convert_token_to_binary_operator(token.token_type) {
         parse_binary_operator(ctx, left, operator)
     } else {
         panic!("Unsupported infix operator: {:?} on line {}", token.token_type, token.line);
@@ -177,7 +193,7 @@ fn get_current_precedence(ctx: &mut ParsingContext) -> u32 {
         let token = ctx.tokens[ctx.current].token_type;
         if let Some(op) = convert_token_to_binary_operator(token) {
             get_precedence(op)
-        } else if token == LeftParen {
+        } else if token == LeftParen || token == Dot {
             8
         } else {
             0
@@ -215,7 +231,7 @@ fn parse_expression(ctx: &mut ParsingContext, precedence: u32) -> Expr {
 
 }
 
-fn primitive_type_by_name(name: &String) -> Type {
+fn primitive_type_by_name(name: &String, ctx: &ParsingContext) -> Type {
     use self::Type::*;
 
     match name.as_ref() {
@@ -232,14 +248,21 @@ fn primitive_type_by_name(name: &String) -> Type {
         "bool" => Bool,
         "char" => Char,
         "void" => Void,
-        _ => panic!("{} is not a primitive type", name),
+        _ => {
+                panic!("{} is not a primitive type", name)
+        },
     }
 }
 
 fn parse_type(ctx: &mut ParsingContext) -> Type {
     let token = consume(ctx);
     if token.token_type == TokenType::Identifier {
-        primitive_type_by_name(&token.lexeme.unwrap())
+        let type_name = token.lexeme.unwrap();
+        if let Some(adt) = ctx.types.get(&type_name) {
+            adt.clone()
+        } else {
+            primitive_type_by_name(&type_name, ctx)
+        }
     } else if token.token_type == TokenType::Star {
         let inner = parse_type(ctx);
         Type::Ptr(box inner)
@@ -255,11 +278,14 @@ fn parse_variable_decl(ctx: &mut ParsingContext) -> Item {
         Type::Infer
     } else {
         let t = parse_type(ctx);
-        expect(ctx, TokenType::Equal);
         t
     };
-    let expr = parse_expression(ctx, 0);
-    let node = ItemKind::VariableDecl(_type, box expr);
+    let expr = if accept(ctx, TokenType::Equal) {
+        Some(box parse_expression(ctx, 0))
+    } else {
+        None
+    };
+    let node = ItemKind::VariableDecl(_type, expr);
     Item {name: identifier.lexeme.unwrap(), node, line: identifier.line }
 }
 
@@ -388,6 +414,36 @@ fn parse_directive(ctx: &mut ParsingContext) -> Item {
     }
 }
 
+fn parse_struct_decl(ctx: &mut ParsingContext) -> Item {
+    let identifier = consume(ctx);
+    expect(ctx, TokenType::ColonColon);
+    expect(ctx, TokenType::Struct);
+    expect(ctx, TokenType::LeftCurly);
+
+    let mut fields = Vec::new();
+
+    while !accept(ctx, TokenType::RightCurly) {
+        let name_token = consume(ctx);
+        if name_token.token_type != TokenType::Identifier {
+            panic!("Expected field identifier byt got {:?}", name_token);
+        }
+        let field_name = name_token.lexeme.unwrap();
+        expect(ctx, TokenType::Colon);
+        let field_type = parse_type(ctx);
+        fields.push((field_name, field_type));
+        expect(ctx, TokenType::Semicolon);
+    }
+
+    let type_name = identifier.lexeme.unwrap();
+    let type_def = Type::Struct(type_name.clone(), fields);
+    if ctx.types.contains_key(&type_name) {
+        panic!("Type {} defined multiple times!", type_name);
+    }
+    ctx.types.insert(type_name.clone(), type_def.clone());
+
+    Item {name: type_name, node: ItemKind::StructDecl(type_def), line: identifier.line }
+}
+
 fn parse_item(ctx: &mut ParsingContext) -> Item {
     use self::TokenType::*;
     let token = look_ahead(ctx, 0);
@@ -400,6 +456,7 @@ fn parse_item(ctx: &mut ParsingContext) -> Item {
     let result = match look_ahead(ctx, 1).token_type {
         Colon => parse_variable_decl(ctx),
         ColonColon => match look_ahead(ctx, 2).token_type {
+            Struct => parse_struct_decl(ctx),
             Identifier | Equal => parse_const_decl(ctx),
             LeftParen => parse_function_decl(ctx),
             _ => panic!("Unexpected token {:?} in item on line {:?}", token.token_type, token.line)
@@ -411,7 +468,7 @@ fn parse_item(ctx: &mut ParsingContext) -> Item {
 }
 
 pub fn parse(tokens: Vec<Token>) -> Vec<Item> {
-    let mut ctx = ParsingContext {current: 0, tokens};
+    let mut ctx = ParsingContext {current: 0, tokens, types: HashMap::new()};
 
     let mut ast = Vec::new();
     while !is_done(&mut ctx) {

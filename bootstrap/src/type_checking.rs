@@ -205,6 +205,32 @@ fn check_condition(condition: Expr, then: Block, otherwise: Option<Box<Block>>, 
     Expr { node: ExprKind::If(box checked_condition, box checked_then, checked_otherwise), t: Type::Void }
 }
 
+fn check_member_access(owner: Expr, field_name: String, ctx: &mut TypeContext) -> Expr {
+
+    let checked_owner = check_expr(owner, ctx);
+    let field_type = {
+
+        let extract_field_type = |struct_name: String, fields: Vec<(String, Type)>| -> Type {
+            for (n, t) in fields {
+                if n == field_name {
+                    return t;
+                }
+            }
+            panic!("Struct {} does not have a field named {}", struct_name, field_name);
+        };
+
+        if let Type::Struct(struct_name, fields) = checked_owner.t.clone() {
+            extract_field_type(struct_name, fields)
+        } else if let Type::Ptr(box Type::Struct(struct_name, fields)) = checked_owner.t.clone() {
+            extract_field_type(struct_name, fields)
+        } else {
+            panic!("Tried to access field {} on non-struct {:?}", field_name, checked_owner);
+        }
+    };
+
+    Expr { node: ExprKind::Member(box checked_owner, field_name), t: field_type }
+}
+
 fn check_expr(expr: Expr, ctx: &mut TypeContext) -> Expr {
     use self::ExprKind::*;
 
@@ -215,6 +241,7 @@ fn check_expr(expr: Expr, ctx: &mut TypeContext) -> Expr {
         Identifier(s) => check_identifier(s, ctx),
         Call(box fun, args) => check_call(fun, args, ctx),
         If(box condition, box then, otherwise) => check_condition(condition, then, otherwise, ctx),
+        Member(box owner, field_name) => check_member_access(owner, field_name, ctx),
     }
 }
 
@@ -323,26 +350,31 @@ fn check_function_decl(name: String, sig: Signature, block: Option<Box<Block>>, 
     ItemKind::FunctionDecl(box Signature {inputs: checked_inputs, output: sig.output}, checked_block)
 }
 
-fn check_variable_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext) -> ItemKind {
+fn check_variable_decl(name: String, t: Type, expr: Option<Box<Expr>>, ctx: &mut TypeContext) -> ItemKind {
     use self::Type::*;
 
-    let mut res_expr = check_expr(expr, ctx);
+    let res_expr = if let Some(box e) = expr {
+        let mut res_expr = check_expr(e, ctx);
 
-    if t == Infer {
-        panic!("Type inference not yet operational. See variable {} ", name);
-    }
+        if t == Infer {
+            panic!("Type inference not yet operational. See variable {} ", name);
+        }
 
-    if t != res_expr.t {
-        res_expr = if let Some(e) = try_implicit_cast(res_expr.clone(), t.clone(), ctx) {
-            e
-        } else {
-            panic!("Declared type {:?} of variable {} does not match right hand {:?}", t, name, res_expr);
-        };
-    }
+        if t != res_expr.t {
+            res_expr = if let Some(e) = try_implicit_cast(res_expr.clone(), t.clone(), ctx) {
+                e
+            } else {
+                panic!("Declared type {:?} of variable {} does not match right hand {:?}", t, name, res_expr);
+            };
+        }
+        Some(box res_expr)
+    } else {
+        None
+    };
 
     declare_symbol(&name, &t, ctx);
 
-    ItemKind::VariableDecl(t, box res_expr)
+    ItemKind::VariableDecl(t, res_expr)
 }
 
 fn check_const_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext) -> ItemKind {
@@ -355,8 +387,9 @@ fn check_item(item: Item, ctx: &mut TypeContext) -> Item {
     let name = item.name.clone();
     let kind = match item.node {
         FunctionDecl(box sig, block) => check_function_decl(name, sig, block, ctx),
-        VariableDecl(t, box expr) => check_variable_decl(name, t, expr, ctx),
+        VariableDecl(t, expr) => check_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => check_const_decl(name, t, expr, ctx),
+        StructDecl(t) => StructDecl(t),
         _ => panic!("Other item kinds does not yet type check: {:?}", item.node),
     };
 

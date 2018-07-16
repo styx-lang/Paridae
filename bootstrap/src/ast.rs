@@ -17,7 +17,7 @@ pub struct Item {
 pub enum ItemKind {
     ConstDecl(Type, Box<Expr>),
     FunctionDecl(Box<Signature>, Option<Box<Block>>),
-    VariableDecl(Type, Box<Expr>),
+    VariableDecl(Type, Option<Box<Expr>>),
     Directive(DirectiveKind),
     StructDecl(Type)
 }
@@ -37,7 +37,7 @@ impl ToString for Signature {
     fn to_string(&self) -> String {
         let mut parts = Vec::new();
         parts.push(String::from("("));
-        for (t, name) in &self.inputs {
+        for (_, name) in &self.inputs {
             parts.push(format!("{}", name));
             parts.push(String::from(", "));
         }
@@ -106,6 +106,7 @@ pub enum Type {
     Ptr(Box<Type>),
     Void,
     Function(Vec<Type>, Box<Type>),
+    Struct(String, Vec<(String,Type)>),
     Infer,
 }
 
@@ -168,6 +169,8 @@ pub enum ExprKind {
     If(Box<Expr>, Box<Block>, Option<Box<Block>>),
     //Literal such as 12 or "hello"
     Literal(Box<LitKind>),
+    //Field access in struct "a.b"
+    Member(Box<Expr>, String),
     //Unary operators such as negation or pointer dereferencing
     Unary(UnaryOperatorKind, Box<Expr>),
 }

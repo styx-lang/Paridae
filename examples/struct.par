@@ -1,0 +1,27 @@
+
+
+Example :: struct {
+    x: s32;
+    y: s32;
+    z: s32;
+}
+
+init :: (s: *Example) {
+   s.x = 1;
+   s.y = 2;
+   s.z = 3;
+}
+
+sum :: (s: Example) -> s32 {
+   return s.x + s.y + s.z;
+}
+
+
+_paridae_entry :: () -> s32 {
+   s : Example;
+
+   init(&s);
+   res : s32 = sum(s);
+   
+   return res;
+}

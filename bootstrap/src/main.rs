@@ -17,7 +17,6 @@ use std::path::Path;
 mod lexer;
 mod tokens;
 mod ast;
-mod ast_visualization;
 mod parser;
 mod codegen;
 mod type_checking;
@@ -53,11 +52,9 @@ fn main() {
 
     let _ = env::set_current_dir(&Path::new(".."));
 
-    let mut items = parse_source_file("examples/while.par");
+    let mut items = parse_source_file("examples/struct.par");
 
     items = execute_include_directives(items);
-
-    //ast_visualization::dump_parse_tree(items[0].clone(), "parse_tree.gv");
 
     let typed_items = type_checking::check(items);
 
