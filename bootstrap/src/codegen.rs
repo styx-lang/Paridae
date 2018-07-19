@@ -67,6 +67,18 @@ fn lookup_symbol(name: &String, ctx: &CodeGenContext) -> LLVMValueRef {
     panic!("Failed to find symbol {}", name);
 }
 
+unsafe fn get_slice_type(element_type: Type, ctx: &CodeGenContext) -> LLVMTypeRef {
+
+    let element_ref = LLVMInt8TypeInContext(ctx.llvm_context);// get_type(element_type, ctx);
+    let array_ref = LLVMArrayType(element_ref, 0);
+
+    let mut llvm_fields = Vec::new();
+    llvm_fields.push(array_ref);
+    llvm_fields.push(LLVMInt32TypeInContext(ctx.llvm_context));
+
+    LLVMStructType(llvm_fields.as_mut_ptr(), llvm_fields.len() as u32, 0)
+}
+
 unsafe fn get_type(t: Type, ctx: &CodeGenContext) -> LLVMTypeRef {
     use self::Type::*;
     use self::IntegerSize::*;
@@ -91,6 +103,7 @@ unsafe fn get_type(t: Type, ctx: &CodeGenContext) -> LLVMTypeRef {
                 panic!("Unknown struct type {:?}", name)
             }
         },
+        Slice(box inner) => get_slice_type(inner, ctx),
         other => panic!("CodeGen does not support {:?} yet", other)
    }
 }
@@ -182,8 +195,7 @@ unsafe fn generate_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &mut CodeGenContex
         }
         arg_values.push(val);
     }
-
-    if LLVMGetTypeKind(LLVMGetReturnType(LLVMGetReturnType(LLVMTypeOf(function)))) == LLVMTypeKind::LLVMVoidTypeKind{
+    if name != "len" && LLVMGetTypeKind(LLVMGetReturnType(LLVMGetReturnType(LLVMTypeOf(function)))) == LLVMTypeKind::LLVMVoidTypeKind{
         LLVMBuildCall(ctx.builder, function, arg_values.as_mut_ptr(), arg_values.len() as u32, b"\0".as_ptr() as *const _)
     } else {
         LLVMBuildCall(ctx.builder, function, arg_values.as_mut_ptr(), arg_values.len() as u32, b"call_tmp\0".as_ptr() as *const _)
@@ -260,6 +272,14 @@ unsafe fn generate_field_access(owner: Expr, field_name: String, ctx: &mut CodeG
     LLVMBuildLoad(ctx.builder, ptr, field_name.as_bytes().as_ptr() as *const _)
 }
 
+
+unsafe fn generate_array_index(array: Expr, index: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
+    let ptr = generate_expr(array, ctx);
+    let offset = generate_expr(index, ctx);
+
+    unimplemented!();
+}
+
 unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
     use self::ExprKind::*;
     
@@ -271,6 +291,7 @@ unsafe fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> LLVMValueRef {
         Call(box fun, args) => generate_call(fun, args, ctx),
         If(box condition, box then, otherwise) => generate_condition(condition, then, otherwise, ctx),
         Member(box owner, field_name) => generate_field_access(owner, field_name, ctx),
+        Index(box array, box index) => generate_array_index(array, index, ctx),
     }
 }
 
@@ -435,6 +456,21 @@ unsafe fn generate_item(item: Item, ctx: &mut CodeGenContext) {
     }
 }
 
+unsafe fn add_builtin(ctx: &mut CodeGenContext) {
+    let slice_type = LLVMPointerType(get_slice_type(Type::Void, ctx), 0);
+    let function_type = LLVMFunctionType(LLVMInt32TypeInContext(ctx.llvm_context), vec![slice_type].as_mut_ptr(), 1, 0);
+    let function = LLVMAddFunction(ctx.module, b"len\0".as_ptr() as *const _, function_type);
+    let bb = LLVMAppendBasicBlockInContext(ctx.llvm_context, function, b"entry\0".as_ptr() as *const _);
+    LLVMPositionBuilderAtEnd(ctx.builder, bb);
+
+    let param = LLVMGetParam(function, 0);
+
+    let zero = LLVMConstInt(LLVMInt32TypeInContext(ctx.llvm_context), 0, 0);
+    let len_ptr = LLVMBuildStructGEP(ctx.builder, param, 1, b"len_deref\0".as_ptr() as *const _);
+    let len = LLVMBuildLoad(ctx.builder, len_ptr, b"len_ptr\0".as_ptr() as *const _);
+    LLVMBuildRet(ctx.builder, len);
+}
+
 pub unsafe fn generate(ast: Vec<Item>) -> String {
     let llvm_context = LLVMContextCreate();
     let module = LLVMModuleCreateWithName(b"paridae\0".as_ptr() as *const _);
@@ -442,6 +478,8 @@ pub unsafe fn generate(ast: Vec<Item>) -> String {
 
     let mut global_scope = Scope { symbols: HashMap::new(), parent: 0 };
     let mut ctx = CodeGenContext { llvm_context, module, builder, scope_arena: vec![global_scope], current_scope: 0 , types: HashMap::new()};
+
+    add_builtin(&mut ctx);
 
     for item in ast {
         generate_item(item, &mut ctx);

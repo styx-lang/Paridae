@@ -167,6 +167,8 @@ pub enum ExprKind {
     //If condition with optional else clause
     // if expr block1 [else block2]
     If(Box<Expr>, Box<Block>, Option<Box<Block>>),
+    //Indexing into array or slice "a[i]"
+    Index(Box<Expr>, Box<Expr>),
     //Literal such as 12 or "hello"
     Literal(Box<LitKind>),
     //Field access in struct "a.b"

@@ -175,7 +175,7 @@ fn check_call(fun: Expr, args: Vec<Box<Expr>>, ctx: &mut TypeContext) -> Expr {
 
     for (input, box arg) in inputs.into_iter().zip(args.into_iter()) {
         let mut checked = check_expr(arg, ctx);
-        if checked.t != input {
+        if checked.t != input && input == Type::Void {
             if let Some(e) = try_implicit_cast(checked.clone(), input.clone(), ctx) {
                 checked = e;
             } else {
@@ -231,6 +231,23 @@ fn check_member_access(owner: Expr, field_name: String, ctx: &mut TypeContext) -
     Expr { node: ExprKind::Member(box checked_owner, field_name), t: field_type }
 }
 
+fn check_array_indexing(array: Expr, index: Expr, ctx: &mut TypeContext) -> Expr {
+
+    let checked_array = check_expr(array, ctx);
+    let checked_index = check_expr(index, ctx);
+
+    match checked_index.t.clone() {
+        Type::Signed(_) => {},
+        other => panic!("Cannot access an array using a {:?} as index", other),
+    }
+
+    if let Type::Slice(box array_type) = checked_array.t.clone() {
+        Expr { node: ExprKind::Index(box checked_array, box checked_index), t: array_type }
+    } else {
+        panic!("Tried to index into non-slice type {:?}", checked_array);
+    }
+}
+
 fn check_expr(expr: Expr, ctx: &mut TypeContext) -> Expr {
     use self::ExprKind::*;
 
@@ -242,6 +259,7 @@ fn check_expr(expr: Expr, ctx: &mut TypeContext) -> Expr {
         Call(box fun, args) => check_call(fun, args, ctx),
         If(box condition, box then, otherwise) => check_condition(condition, then, otherwise, ctx),
         Member(box owner, field_name) => check_member_access(owner, field_name, ctx),
+        Index(box array, box index) => check_array_indexing(array, index, ctx),
     }
 }
 
@@ -396,11 +414,18 @@ fn check_item(item: Item, ctx: &mut TypeContext) -> Item {
     Item {name: item.name, node: kind, line: item.line }
 }
 
+fn add_builtin(ctx: &mut TypeContext) {
+
+    declare_symbol(&String::from("len"), &Type::Function(vec![Type::Slice(box Type::Void)], box Type::Signed(IntegerSize::I32)), ctx);
+}
+
 pub fn check(ast: Vec<Item>) -> Vec<Item> {
 
     let global_scope = TypeScope { symbols: HashMap::new(), parent: 0, current_return_type: Type::Void };
 
     let mut ctx = TypeContext { current: 0, scope_arena: vec![global_scope] };
+
+    add_builtin(&mut ctx);
 
     let mut resulting_ast = Vec::new();
 

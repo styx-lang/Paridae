@@ -153,6 +153,13 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
     Expr { node: ExprKind::Member(box left, field_name), t: Type::Infer }
 }
 
+fn parse_indexing(ctx: &mut ParsingContext, left: Expr) -> Expr {
+    let index = parse_expression(ctx, 0);
+    expect(ctx, TokenType::RightBracket);
+
+    Expr { node: ExprKind::Index(box left, box index), t: Type::Infer }
+}
+
 fn parse_infix_operator(ctx: &mut ParsingContext, left: Expr, token: Token) -> Expr {
     use self::TokenType::*;
 
@@ -160,7 +167,9 @@ fn parse_infix_operator(ctx: &mut ParsingContext, left: Expr, token: Token) -> E
         parse_call(ctx, left)
     } else if token.token_type == Dot {
         parse_member_access(ctx, left)
-    }else if let Some(operator) = convert_token_to_binary_operator(token.token_type) {
+    } else if token.token_type == LeftBracket {
+        parse_indexing(ctx, left)
+    } else if let Some(operator) = convert_token_to_binary_operator(token.token_type) {
         parse_binary_operator(ctx, left, operator)
     } else {
         panic!("Unsupported infix operator: {:?} on line {}", token.token_type, token.line);
@@ -193,7 +202,7 @@ fn get_current_precedence(ctx: &mut ParsingContext) -> u32 {
         let token = ctx.tokens[ctx.current].token_type;
         if let Some(op) = convert_token_to_binary_operator(token) {
             get_precedence(op)
-        } else if token == LeftParen || token == Dot {
+        } else if token == LeftParen || token == Dot || token == LeftBracket {
             8
         } else {
             0
@@ -266,6 +275,10 @@ fn parse_type(ctx: &mut ParsingContext) -> Type {
     } else if token.token_type == TokenType::Star {
         let inner = parse_type(ctx);
         Type::Ptr(box inner)
+    } else if token.token_type == TokenType::LeftBracket {
+        expect(ctx, TokenType::RightBracket);
+        let inner = parse_type(ctx);
+        Type::Slice(box inner)
     } else {
         panic!("Expected type but got {:?} on line {:?}", token.token_type, token.line);
     }

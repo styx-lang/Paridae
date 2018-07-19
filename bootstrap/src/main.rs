@@ -52,7 +52,7 @@ fn main() {
 
     let _ = env::set_current_dir(&Path::new(".."));
 
-    let mut items = parse_source_file("examples/struct.par");
+    let mut items = parse_source_file("examples/slices.par");
 
     items = execute_include_directives(items);
 
