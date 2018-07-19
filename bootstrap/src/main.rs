@@ -18,7 +18,7 @@ mod lexer;
 mod tokens;
 mod ast;
 mod parser;
-mod codegen;
+mod c_codegen;
 mod type_checking;
 
 fn parse_source_file(filename: &str) -> Vec<ast::Item> {
@@ -52,16 +52,14 @@ fn main() {
 
     let _ = env::set_current_dir(&Path::new(".."));
 
-    let mut items = parse_source_file("examples/slices.par");
+    let mut items = parse_source_file("examples/while.par");
 
     items = execute_include_directives(items);
 
     let typed_items = type_checking::check(items);
 
-    let llir = unsafe {
-        codegen::generate(typed_items)
-    };
+    let output = c_codegen::generate(typed_items);
 
-    let mut output_file = File::create("main.ll").unwrap();
-    let _ = output_file.write(llir.as_bytes());
+    let mut output_file = File::create("main.c").unwrap();
+    let _ = output_file.write(output.as_bytes());
 }
