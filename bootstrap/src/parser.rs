@@ -193,6 +193,15 @@ fn parse_call(ctx: &mut ParsingContext, left: Expr) -> Expr {
     Expr {node: ExprKind::Call(box left,  args), t: Type::Infer }
 }
 
+fn parse_cast(ctx: &mut ParsingContext) -> Expr {
+    expect(ctx, TokenType::LeftParen);
+    let target = parse_type(ctx);
+    expect(ctx, TokenType::Comma);
+    let inner = parse_expression(ctx, 0);
+    expect(ctx, TokenType::RightParen);
+    Expr { node: ExprKind::Cast(target, box inner), t: Type::Infer }
+}
+
 fn get_current_precedence(ctx: &mut ParsingContext) -> u32 {
     use self::TokenType::*;
 
@@ -217,6 +226,7 @@ fn parse_expression(ctx: &mut ParsingContext, precedence: u32) -> Expr {
     let token = consume(ctx);
 
     let mut left = match token.token_type {
+        Cast => parse_cast(ctx),
         Identifier => parse_identifier(ctx, token.clone()),
         Integer => parse_integer_literal(ctx, token.clone()),
         TokenType::String => parse_string_literal(ctx, token.clone()),

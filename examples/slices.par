@@ -1,0 +1,16 @@
+
+sum :: (data: []s8) -> s32 {
+  i : s32 = 0;
+  sum : s32 = 0;
+  while i < len(data) {
+    i = i + 1;
+    sum = sum + cast(s32, data[i]);
+  }
+  return sum;
+}
+
+_paridae_entry :: () -> s32 {
+  arr : []s8 = "Hello world!";
+  res : s32 = sum(arr);
+  return res; 
+}

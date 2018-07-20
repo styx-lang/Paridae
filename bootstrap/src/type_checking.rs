@@ -30,7 +30,7 @@ fn finalize_scope(ctx: &mut TypeContext) {
 }
 
 fn declare_symbol(name: &String, t: &Type, ctx: &mut TypeContext) {
-    let mut current_scope = &mut ctx.scope_arena[ctx.current].symbols;
+    let current_scope = &mut ctx.scope_arena[ctx.current].symbols;
     if current_scope.contains_key(name) {
         panic!("Redeclaring symbol {}", name);
     }
@@ -248,13 +248,30 @@ fn check_array_indexing(array: Expr, index: Expr, ctx: &mut TypeContext) -> Expr
     }
 }
 
+fn check_literal(lit: LitKind) -> Type {
+    use self::LitKind::*;
+
+    match lit {
+        Bool(_) => Type::Bool,
+        Float(_) => Type::Float(FloatingSize::F64),
+        Int(_) => Type::Signed(IntegerSize::I32),
+        Str(_) => Type::Slice(box Type::Signed(IntegerSize::I8))
+    }
+}
+
+fn check_casting(target: Type, inner: Expr, ctx: &mut TypeContext) -> Expr {
+    let checked_inner = check_expr(inner, ctx);
+    Expr { node: ExprKind::Cast(target.clone(), box checked_inner), t: target }
+}
+
 fn check_expr(expr: Expr, ctx: &mut TypeContext) -> Expr {
     use self::ExprKind::*;
 
     match expr.node {
+        Cast(target, box inner) => check_casting(target, inner, ctx),
         Unary(op, box inner) => check_unary_operator(op, inner, ctx),
         Binary(op, box lhs, box rhs) => check_binary_operator(op, lhs, rhs, ctx),
-        Literal(box lit) => Expr { node: ExprKind::Literal(box lit), t: expr.t },
+        Literal(box lit) => Expr { node: ExprKind::Literal(box lit.clone()), t: check_literal(lit) },
         Identifier(s) => check_identifier(s, ctx),
         Call(box fun, args) => check_call(fun, args, ctx),
         If(box condition, box then, otherwise) => check_condition(condition, then, otherwise, ctx),

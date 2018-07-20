@@ -1,0 +1,14 @@
+
+strlen :: (str: *s8) -> u64
+strcmp :: (lhs: *s8, rhs: *s8) -> s32
+strncmp :: (lhs: *s8, rhs: *s8) -> s32
+
+_paridae_slice :: struct {
+  ptr : *u8;
+  len : s32;
+}
+
+c_str :: (s: []s8) -> *s8 {
+  raw : _paridae_slice = cast(_paridae_slice, s);
+  return cast(*s8, raw.ptr);
+}

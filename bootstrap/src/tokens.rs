@@ -12,6 +12,7 @@ pub enum TokenType {
     EOF,
     //Keywords
     Break,
+    Cast,
     Const,
     Continue,
     Defer,
@@ -73,6 +74,7 @@ pub fn is_keyword(s: &str) -> Option<TokenType> {
     // Apparently Rust does not yet support static const HashMaps?
     match s {
         "break" => Some(Break),
+        "cast" => Some(Cast),
         "const" => Some(Const),
         "continue" => Some(Continue),
         "defer" => Some(Defer),

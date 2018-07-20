@@ -12,24 +12,34 @@ struct CodeGenContext {
     builder: Vec<String>,
 }
 
-fn generate_int_literal(val: i64) -> String {
-    format!("{}", val)
-}
-
 fn generate_literal(lit: LitKind, t: Type) -> String {
     use self::LitKind::*;
 
     match lit {
-        Int(i) => generate_int_literal(i),
+        Int(i) =>format!("{}", i),
+        Str(s) => format!("{{(u8*)\"{}\", {}}}", s, s.len()+1),
         _ => panic!("Literal type not yet supported!")
     }
+}
+
+fn get_int_size_postfix(size: IntegerSize) -> String {
+    use self::IntegerSize::*;
+
+    match size {
+        I8 => "8",
+        I16 => "16",
+        I32 => "32",
+        I64 => "64",
+        Arch => "64",
+        Unspecified => "32",
+    }.to_string()
 }
 
 fn get_type(t: Type, ctx: &CodeGenContext) -> String {
     match t {
         Type::Void => "void".to_string(),
-        Type::Signed(size) => "int".to_string(),
-        Type::Unsigned(size) => "unsigned int".to_string(),
+        Type::Signed(size) => format!("s{}", get_int_size_postfix(size)),
+        Type::Unsigned(size) => format!("u{}", get_int_size_postfix(size)),
         Type::Bool => "int".to_string(),
         Type::Ptr(box inner) => format!("{}*", get_type(inner, ctx)),
         Type::Slice(box inner) => "_paridae_slice".to_string(),
@@ -105,16 +115,22 @@ fn generate_field_access(owner: Expr, field_name: String, ctx: &mut CodeGenConte
 
 
 fn generate_array_index(array: Expr, index: Expr, ctx: &mut CodeGenContext) -> String {
+    let array_type = get_type(array.t.clone(), ctx);
     let ptr = generate_expr(array, ctx);
     let offset = generate_expr(index, ctx);
 
-    format!("{}[{}]", ptr, offset)
+    format!("{}.ptr[{}*sizeof({})]", ptr, offset, array_type)
+}
+
+fn generate_cast(target: Type, inner: Expr, ctx: &mut CodeGenContext) -> String {
+    format!("({})({})", get_type(target, ctx), generate_expr(inner, ctx))
 }
 
 fn generate_expr(expr: Expr, ctx: &mut CodeGenContext) -> String {
     use self::ExprKind::*;
 
     match expr.node {
+        Cast(target, box inner) => generate_cast(target, inner, ctx),
         Unary(op, box inner) => generate_unary_operator(op, inner, ctx),
         Binary(op, box lhs, box rhs) => generate_binary_operator(op, lhs, rhs, ctx),
         Literal(box lit) => generate_literal(lit, expr.t),
@@ -258,7 +274,7 @@ fn generate_prelude(ctx: &mut CodeGenContext) {
         "typedef unsigned short u16;",
         "typedef unsigned int u32;",
         "typedef unsigned long u64;",
-        "typedef char s8;",
+        "typedef signed char s8;",
         "typedef short s16;",
         "typedef int s32;",
         "typedef long s64;",

@@ -1,0 +1,7 @@
+#include lib/cstring.par
+
+_paridae_entry :: () -> s32 {
+  s : []s8 = "Hello world!";
+
+  return cast(s32,strlen(c_str(s)));
+}

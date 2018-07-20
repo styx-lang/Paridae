@@ -160,6 +160,8 @@ pub enum LitKind {
 pub enum ExprKind {
     //Binary operator expression such as 12 * 42
     Binary(BinaryOperatorKind, Box<Expr>, Box<Expr>),
+    //Cast transforms a value from one type to another
+    Cast(Type, Box<Expr>),
     //Function call where the first expression resolves to the function
     //and the vector of expression resolves to each argument
     Call(Box<Expr>, Vec<Box<Expr>>),
