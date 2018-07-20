@@ -1,0 +1,20 @@
+#include lib/prelude.par
+
+//Memory management
+
+malloc :: (size: u64) -> *void
+calloc :: (num: u64, size: u64) -> *void
+realloc :: (ptr: *void, new_size: u64) -> *void
+free :: (ptr: *void)
+
+make :: (size: u64) -> []u8 {
+  p : *u8 = cast(*u8, malloc(1024));
+  slice : _paridae_slice;
+  slice.ptr = p;
+  slice.len = size;
+}
+
+delete :: ([]u8 slice) {
+  slice : _paridae_slice = cast([]u8, slice);
+  free(slice.ptr);
+}

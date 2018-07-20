@@ -351,9 +351,16 @@ fn parse_stmt(ctx: &mut ParsingContext) -> Stmt {
         } else {
             let left = parse_expression(ctx, 0);
             let next = look_ahead(ctx, 0);
+
+            //Semicolon exception on if statements to conform to regular C syntax
+            match left.node.clone() {
+                ExprKind::If(_,_,_) => semicolon_exception = true,
+                _ => {}
+            }
+
             if next.token_type == Equal {
                 parse_assignment(left, ctx)
-            } else if next.token_type == Semicolon || next.token_type == RightCurly {
+            } else if semicolon_exception || next.token_type == Semicolon || next.token_type == RightCurly {
                 Stmt { node: StmtKind::Expr(box left) }
             } else {
                 panic!("Unexpected token {:?} on line {} ", next, next.line);

@@ -1,0 +1,24 @@
+
+
+_paridae_entry :: () -> s32 {
+  sum : s32 = 0;
+  i : s32 = 0;
+  while i < 10 {
+    if i == 5 {
+       break;
+    }
+    i = i + 1;
+  }
+  sum = sum + i;
+  i = 0;
+
+  while i < 10 {
+    i = i + 1;
+    if i > 7 {
+      continue;
+    }
+    sum = sum + 1;
+  }
+
+  return sum;
+}

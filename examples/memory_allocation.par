@@ -1,0 +1,14 @@
+#include lib/prelude.par
+
+_paridae_entry :: () -> s32 {
+  p : []u8 = make(1024);
+
+  i : s32 = 0;
+  while i < 1024 {
+    p[i] = cast(u8, i / 4);
+    i = i + 1;
+  }
+
+  delete(p);
+  return 0;
+}

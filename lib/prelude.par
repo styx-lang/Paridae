@@ -1,0 +1,28 @@
+_paridae_slice :: struct {
+  ptr : *u8;
+  len : s32;
+}
+
+len :: (slice: _paridae_slice) -> s32 {
+  return slice.len;
+}
+
+//Memory management
+
+malloc :: (size: u64) -> *void
+calloc :: (num: u64, size: u64) -> *void
+realloc :: (ptr: *void, new_size: u64) -> *void
+free :: (ptr: *void)
+
+make :: (size: u64) -> []u8 {
+  p : *u8 = cast(*u8, malloc(1024));
+  slice : _paridae_slice;
+  slice.ptr = p;
+  slice.len = cast(s32, size);
+  return cast([]u8, slice);
+}
+
+delete :: (slice: []u8) {
+  internal : _paridae_slice = cast(_paridae_slice, slice);
+  free(internal.ptr);
+}

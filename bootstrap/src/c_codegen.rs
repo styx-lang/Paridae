@@ -102,7 +102,7 @@ fn generate_condition(condition: Expr, then: Block, otherwise: Option<Box<Block>
     if let Some(box o) = otherwise {
         generate_block(o, ctx);
     }
-    String::from("Conditions are not real expressions yet!")
+    String::from("")
 }
 
 
@@ -158,26 +158,9 @@ fn generate_while(condition: Expr, block: Block, ctx: &mut CodeGenContext) {
 fn generate_assignment(place: Expr, value: Expr, ctx: &mut CodeGenContext) {
     let res_val = generate_expr(value, ctx);
 
-    //TODO Simplify
+    let place_result = generate_expr(place, ctx);
 
-    let result = match place.node {
-        ExprKind::Identifier(ident) => {
-            format!("{} = {};", ident, res_val)
-        },
-        ExprKind::Unary(UnaryOperatorKind::Deref, box inner) => {
-            if let ExprKind::Identifier(ident) = inner.node {
-                format!("*{} = {};", ident, res_val)
-            } else {
-                panic!("Can only assign to simple pointers for now {:?}", inner);
-            }
-        },
-        ExprKind::Member(box owner, field_name) => {
-            let owner_expr = generate_expr(owner, ctx);
-            format!("{}.{} = {}", owner_expr, field_name, res_val)
-        }
-        _ => panic!("Currently does not supports assigning to place {:?}", place),
-    };
-    ctx.builder.push(result);
+    ctx.builder.push(format!("{} = {};", place_result, res_val));
 }
 
 fn generate_stmt(stmt: Stmt, ctx: &mut CodeGenContext) {
@@ -192,6 +175,8 @@ fn generate_stmt(stmt: Stmt, ctx: &mut CodeGenContext) {
         },
         While(box c, box b) => generate_while(c, b, ctx),
         Assignment(box place, box value) => generate_assignment(place, value, ctx),
+        Break => ctx.builder.push(String::from("break;")),
+        Continue => ctx.builder.push(String::from("continue;")),
         _ => panic!("Other statement kinds not yet supported {:?}", stmt.node),
     }
 }
@@ -243,7 +228,7 @@ fn generate_const_decl(name: String, _type: Type, expr: Expr, ctx: &CodeGenConte
 }
 
 fn generate_struct_decl(name: String, _type: Type, ctx: &mut CodeGenContext) {
-    ctx.builder.push(format!("struct {} {{", name));
+    ctx.builder.push(String::from("typedef struct {"));
     if let Type::Struct(_, fields) = _type {
         for (field_name, field_type) in &fields {
             let type_string = get_type(field_type.clone(), ctx);
@@ -252,7 +237,7 @@ fn generate_struct_decl(name: String, _type: Type, ctx: &mut CodeGenContext) {
    } else {
         panic!("ICE: Passed non-struct type decl to 'generate_struct_decl'");
     }
-    ctx.builder.push(format!("}}"));
+    ctx.builder.push(format!("}} {};", name));
 }
 
 fn generate_item(item: Item, ctx: &mut CodeGenContext) {
@@ -278,13 +263,6 @@ fn generate_prelude(ctx: &mut CodeGenContext) {
         "typedef short s16;",
         "typedef int s32;",
         "typedef long s64;",
-        "typedef struct {",
-        "u8* ptr;",
-        "s32 len;",
-        "} _paridae_slice;",
-        "s32 len(_paridae_slice slice) {",
-        "return slice.len;",
-        "}",
     ];
     ctx.builder.push(prelude.join("\n"));
 }

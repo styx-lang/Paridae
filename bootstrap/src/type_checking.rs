@@ -338,7 +338,9 @@ fn check_stmt(stmt: Stmt, ctx: &mut TypeContext) -> Stmt {
         },
         While(box condition, box block) => check_while(condition, block, ctx),
         Assignment(box place, box value) => check_assignment(place, value, ctx),
-        _ => panic!("Other statement kinds not yet supported {:?}")
+        Break => Break,
+        Continue => Continue,
+        other => panic!("Other statement kinds not yet supported {:?}", other),
     };
 
     Stmt { node: kind }
@@ -431,18 +433,11 @@ fn check_item(item: Item, ctx: &mut TypeContext) -> Item {
     Item {name: item.name, node: kind, line: item.line }
 }
 
-fn add_builtin(ctx: &mut TypeContext) {
-
-    declare_symbol(&String::from("len"), &Type::Function(vec![Type::Slice(box Type::Void)], box Type::Signed(IntegerSize::I32)), ctx);
-}
-
 pub fn check(ast: Vec<Item>) -> Vec<Item> {
 
     let global_scope = TypeScope { symbols: HashMap::new(), parent: 0, current_return_type: Type::Void };
 
     let mut ctx = TypeContext { current: 0, scope_arena: vec![global_scope] };
-
-    add_builtin(&mut ctx);
 
     let mut resulting_ast = Vec::new();
 
