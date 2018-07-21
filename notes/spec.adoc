@@ -1,0 +1,69 @@
+
+== The Paridae Language Specification
+
+=== Introduction
+
+=== Lexical structure
+* Source code format
+* Comments
+* Identifiers
+* Keywords
+* Operators
+* Punctuation
+* Literals
+
+
+=== Type system
+* Primitives
+* Structs
+* Tuples
+* ADT's
+* Pointers
+* Arrays
+* Slices
+* Char
+* Function
+* Type coercion
+
+
+=== Item declarations
+* Const vs mutable
+* Variables
+** Default initialization
+* Functions
+** Varags
+** Inlining
+* Structs
+* Enum
+
+=== Scoping
+* Labels
+* Scoping
+* Namespaces
+** Use
+** With
+
+
+=== Expressions
+* Operands
+* Operators
+* Primary
+* Blocks
+* If-else
+* Match
+
+
+=== Statements
+* Assignment
+* Return
+* Defer
+* While loops
+* For loops
+** Ranges
+** Implicit iterator
+* Break / continue
+* Expression statements
+
+=== Error handling
+
+=== Built-ins
