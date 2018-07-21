@@ -1,0 +1,16 @@
+
+
+Level :: enum {
+  LOW,
+  MEDIUM,
+  HIGH,
+}
+
+
+_paridae_entry :: () -> s32 {
+
+  x : Level = MEDIUM;
+
+
+  return x;
+}

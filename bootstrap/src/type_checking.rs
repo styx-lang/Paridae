@@ -427,7 +427,8 @@ fn check_item(item: Item, ctx: &mut TypeContext) -> Item {
         VariableDecl(t, expr) => check_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => check_const_decl(name, t, expr, ctx),
         StructDecl(t) => StructDecl(t),
-        _ => panic!("Other item kinds does not yet type check: {:?}", item.node),
+        EnumDecl(t) => EnumDecl(t),
+        Directive(k) => Directive(k)
     };
 
     Item {name: item.name, node: kind, line: item.line }

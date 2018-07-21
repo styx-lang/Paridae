@@ -19,7 +19,8 @@ pub enum ItemKind {
     FunctionDecl(Box<Signature>, Option<Box<Block>>),
     VariableDecl(Type, Option<Box<Expr>>),
     Directive(DirectiveKind),
-    StructDecl(Type)
+    StructDecl(Type),
+    EnumDecl(Type)
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +108,7 @@ pub enum Type {
     Void,
     Function(Vec<Type>, Box<Type>),
     Struct(String, Vec<(String,Type)>),
+    Enum(String, Vec<String>),
     Infer,
 }
 

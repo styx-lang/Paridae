@@ -444,6 +444,33 @@ fn parse_directive(ctx: &mut ParsingContext) -> Item {
     }
 }
 
+fn parse_enum_decl(ctx: &mut ParsingContext) -> Item {
+    let identifier = consume(ctx);
+    expect(ctx, TokenType::ColonColon);
+    expect(ctx, TokenType::Enum);
+    expect(ctx, TokenType::LeftCurly);
+
+    let mut variants = Vec::new();
+
+    while !accept(ctx, TokenType::RightCurly) {
+        let name_token = consume(ctx);
+        if name_token.token_type != TokenType::Identifier {
+            panic!("Expected variant identifier but got {:?}", name_token);
+        }
+        let field_name = name_token.lexeme.unwrap();
+        expect(ctx, TokenType::Comma);
+    }
+
+    let type_name = identifier.lexeme.unwrap();
+    let type_def = Type::Enum(type_name.clone(), variants);
+    if ctx.types.contains_key(&type_name) {
+        panic!("Type {} defined multiple times!", type_name);
+    }
+    ctx.types.insert(type_name.clone(), type_def.clone());
+
+    Item {name: type_name, node: ItemKind::EnumDecl(type_def), line: identifier.line }
+}
+
 fn parse_struct_decl(ctx: &mut ParsingContext) -> Item {
     let identifier = consume(ctx);
     expect(ctx, TokenType::ColonColon);
@@ -455,7 +482,7 @@ fn parse_struct_decl(ctx: &mut ParsingContext) -> Item {
     while !accept(ctx, TokenType::RightCurly) {
         let name_token = consume(ctx);
         if name_token.token_type != TokenType::Identifier {
-            panic!("Expected field identifier byt got {:?}", name_token);
+            panic!("Expected field identifier but got {:?}", name_token);
         }
         let field_name = name_token.lexeme.unwrap();
         expect(ctx, TokenType::Colon);
@@ -486,6 +513,7 @@ fn parse_item(ctx: &mut ParsingContext) -> Item {
     let result = match look_ahead(ctx, 1).token_type {
         Colon => parse_variable_decl(ctx),
         ColonColon => match look_ahead(ctx, 2).token_type {
+            Enum => parse_enum_decl(ctx),
             Struct => parse_struct_decl(ctx),
             Identifier | Equal => parse_const_decl(ctx),
             LeftParen => parse_function_decl(ctx),

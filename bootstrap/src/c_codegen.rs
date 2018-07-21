@@ -240,6 +240,18 @@ fn generate_struct_decl(name: String, _type: Type, ctx: &mut CodeGenContext) {
     ctx.builder.push(format!("}} {};", name));
 }
 
+fn generate_enum_decl(name: String, _type: Type, ctx: &mut CodeGenContext) {
+    ctx.builder.push(String::from("typedef enum {"));
+    if let Type::Enum(_, variants) = _type {
+        for variant_name in &variants {
+            ctx.builder.push(format!("{},", variant_name));
+        }
+   } else {
+        panic!("ICE: Passed non-enum type decl to 'generate_enum_decl'");
+    }
+    ctx.builder.push(format!("}} {};", name));
+}
+
 fn generate_item(item: Item, ctx: &mut CodeGenContext) {
     use self::ItemKind::*;
 
@@ -249,6 +261,7 @@ fn generate_item(item: Item, ctx: &mut CodeGenContext) {
         VariableDecl(t, expr) => generate_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => generate_const_decl(name, t, expr, ctx),
         StructDecl(t) => generate_struct_decl(name, t, ctx),
+        EnumDecl(t) => generate_enum_decl(name, t, ctx),
         Directive(_) => panic!("ICE: Directive item should have been processed before codegen"),
     }
 }
