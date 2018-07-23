@@ -4,13 +4,105 @@
 === Introduction
 
 === Lexical structure
-* Source code format
-* Comments
-* Identifiers
-* Keywords
-* Operators
-* Punctuation
-* Literals
+==== Source code format
+Paridae source code is Unicode text encoded in UTF-8.
+The following production are used the rest of this document to refere to the basic character classes
+----
+letter := "A" ... "Z" | "a" ... "z"
+digit := "0" ... "9"
+binary_digit := "0" | "1"
+octal_digit := "0" .. "7"
+hex_digit := "0" .. "9" | "a" .. "f" | "A" .. "F"
+----
+
+==== Comments
+Paridae supports two comment forms:
+
+1. _Line comments_ which starts with a double forward slash ''//'' and runs until the next newline
+2. _Block comments_ which starts with ''/\*'' and runs until its matching ''*/''.
+   Nested block comments are fully supported
+
+==== Identifiers
+An identifier is a sequence of one or more ASCII characters used to name program entities.
+
+----
+identifier := (letter | "_") { letter | "_" | digit }
+----
+
+==== Keywords
+The following keywords are reserved and cannot be used as identifiers
+
+----
+break  cast   continue  defer   enum   else
+for    if     return    struct  while
+----
+
+==== Operators
+The following symbols are used to represent operators and are
+all available for overloading
+----
++    -    *    /    %    ^
+=    +=   -=   *=   /=   %=
+&    |    ^|   <<   >>   ~
+&&   ||   ==   !    !=
+<    >    <=   >=   ++   --   
+----
+
+==== Punctuation
+The following symbols are used for punctuation and cannot be overloaded
+----
+.    ,    :    ;    ::   ...  ->
+(    )    [    ]    {    }
+----
+
+==== Literals
+
+Pardiae support five types of literals
+
+.Integer literals
+
+An integer literal represents a integer constant and is by default
+in decimal but can be expressed in binary, octal or hexadecimal
+by using prefixes.
+----
+
+integer_lit = decimal_lit | binary_lit | octal_lit | hex_lit
+decimal_lit = digit { digit }
+binary_lit = "0b" binary_digit { binary_digit }
+octal_lit = "0o" octal_digit { octal_digit }
+hex_lit = "0x" hex_digit { hex_digit }
+----
+
+.Float literals
+
+Float literals represents IEEE 754 Floating point numbers.
+They are distingushed syntactically from integers by their dot,
+exponentiation or both.
+Literals are infered as double precision unless they end with a ''f'' suffix
+----
+decimals  = digit { digits}
+exponent = ( "e" | "E" ) [ "+" | "-" ] decimals
+float_lit = [ decimals ] "." decimals [ exponent ] | decimals exponent
+----
+.Boolean literals
+
+Boolean literals are used to indicate truth values
+----
+bool = "true" | "false"
+----
+
+.Char literal
+
+Character literals allows representating any Unicode codepoint.
+A character can be representated either as the raw character itself or by its
+hexadecimal number. 
+----
+char_lit = "'" ( unicode_value | escaped_value ) "'"
+unicode_value = an arbitrary unicode code point
+escaped_value = [ "\u" | "\U" ] hex_digit hex_digit hex_digit hex_digit
+----
+
+.String literal
 
 
 === Type system
