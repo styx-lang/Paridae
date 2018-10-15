@@ -458,6 +458,7 @@ fn parse_enum_decl(ctx: &mut ParsingContext) -> Item {
             panic!("Expected variant identifier but got {:?}", name_token);
         }
         let field_name = name_token.lexeme.unwrap();
+        variants.push(field_name);
         expect(ctx, TokenType::Comma);
     }
 

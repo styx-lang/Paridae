@@ -44,6 +44,7 @@ fn get_type(t: Type, ctx: &CodeGenContext) -> String {
         Type::Ptr(box inner) => format!("{}*", get_type(inner, ctx)),
         Type::Slice(box inner) => "_paridae_slice".to_string(),
         Type::Struct(name, _) => name,
+        Type::Enum(name, _) => name,
         other => panic!("Type {:?} is not yet implemented", other),
     }
 }

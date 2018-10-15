@@ -1,4 +1,4 @@
-#!/bin/fish
+#!/usr/bin/env fish
 
 cargo build
 target/debug/paridae

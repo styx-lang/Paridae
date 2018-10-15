@@ -418,16 +418,29 @@ fn check_const_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext) ->
     panic!("Not yet supported");
 }
 
+fn check_enum_decl(t: Type, ctx: &mut TypeContext) -> ItemKind {
+    if let Type::Enum(name, variants) = t.clone() {
+        for variant in variants {
+            println!("Inserting symbol {}", variant);
+            ctx.scope_arena[ctx.current].symbols.insert(variant, t.clone());
+        }
+    } else {
+        panic!("Enum was of unexpected type {:?}", t);
+    }
+    ItemKind::EnumDecl(t)
+}
+
 fn check_item(item: Item, ctx: &mut TypeContext) -> Item {
     use self::ItemKind::*;
 
     let name = item.name.clone();
+    println!("Checking {}", name);
     let kind = match item.node {
         FunctionDecl(box sig, block) => check_function_decl(name, sig, block, ctx),
         VariableDecl(t, expr) => check_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => check_const_decl(name, t, expr, ctx),
         StructDecl(t) => StructDecl(t),
-        EnumDecl(t) => EnumDecl(t),
+        EnumDecl(t) => check_enum_decl(t, ctx),
         Directive(k) => Directive(k)
     };
 
