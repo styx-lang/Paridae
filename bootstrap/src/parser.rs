@@ -10,10 +10,58 @@ use ast::*;
 
 use std::collections::HashMap;
 
+struct Scope {
+    symbols: HashMap<String, Type>,
+    parent: usize,
+    current_return_type: Type
+}
+
 struct ParsingContext {
     current: usize,
     tokens: Vec<Token>,
     types: HashMap<String, Type>,
+    current_scope_arena: usize,
+    scope_arena: Vec<Scope>,
+}
+
+fn initialize_scope(return_type: Type, ctx: &mut ParsingContext) {
+    let new_scope = Scope { symbols: HashMap::new(), parent: ctx.current_scope_arena, current_return_type: return_type  } ;
+    ctx.scope_arena.push(new_scope);
+    ctx.current_scope_arena = ctx.scope_arena.len()-1;
+}
+
+fn finalize_scope(ctx: &mut ParsingContext) {
+    ctx.current_scope_arena = ctx.scope_arena[ctx.current_scope_arena].parent;
+}
+
+fn declare_symbol(name: &String, t: &Type, ctx: &mut ParsingContext) {
+    let current_scope = &mut ctx.scope_arena[ctx.current_scope_arena].symbols;
+    if current_scope.contains_key(name) {
+        panic!("Redeclaring symbol {}", name);
+    }
+    current_scope.insert(name.clone(), t.clone());
+}
+
+fn lookup_symbol(name: &String, ctx: &mut ParsingContext) -> Type {
+    let mut reached_top = false;
+
+    let mut current = ctx.current_scope_arena;
+    while !reached_top {
+        if current == 0 {
+            reached_top = true;
+        }
+        let current_scope = &ctx.scope_arena[current];
+        if let Some(t) = current_scope.symbols.get(name) {
+            return t.clone();
+        } else {
+            current = current_scope.parent;
+        }
+    }
+    panic!("Failed to find symbol {}", name);
+}
+
+fn get_current_return_type(ctx: &mut ParsingContext) -> Type {
+    ctx.scope_arena[ctx.current_scope_arena].current_return_type.clone()
 }
 
 fn is_done(ctx: &mut ParsingContext) -> bool {
@@ -79,6 +127,8 @@ fn get_precedence(operator: BinaryOperatorKind) -> u32 {
         GreaterEq => 3,
         Equality => 3,
         NotEq => 3,
+        Or => 2,
+        And => 1
     }
 }
 
@@ -98,7 +148,11 @@ fn parse_string_literal(ctx: &mut ParsingContext, token: Token) -> Expr {
 }
 
 fn parse_identifier(ctx: &mut ParsingContext, token: Token) -> Expr {
-    Expr{ node: ExprKind::Identifier(token.lexeme.unwrap()), t: Type::Infer }
+
+    let name = token.lexeme.unwrap();
+    let t = lookup_symbol(&name, ctx);
+
+    Expr{ node: ExprKind::Identifier(name), t }
 }
 
 fn parse_prefix_operator(ctx: &mut ParsingContext, token: Token) -> Expr {
@@ -130,6 +184,8 @@ fn convert_token_to_binary_operator(token: TokenType) -> Option<BinaryOperatorKi
         GreaterEqual => Some(BinaryOperatorKind::GreaterEq),
         EqualEqual => Some(BinaryOperatorKind::Equality),
         BangEqual => Some(BinaryOperatorKind::NotEq),
+        AndAnd => Some(BinaryOperatorKind::And),
+        OrOr => Some(BinaryOperatorKind::Or),
         _ => None,
     }
 }
@@ -138,8 +194,8 @@ fn parse_binary_operator(ctx: &mut ParsingContext, left: Expr, operator: BinaryO
 
     let precedence = get_precedence(operator);
     let right = parse_expression(ctx, precedence);
-
-    Expr{ node: ExprKind::Binary(operator, Box::new(left), Box::new(right)), t: Type::Infer }
+    let t = left.t.clone();
+    Expr{ node: ExprKind::Binary(operator, Box::new(left), Box::new(right)), t}
 }
 
 
@@ -150,7 +206,32 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
     }
     let field_name = field_token.lexeme.unwrap();
 
-    Expr { node: ExprKind::Member(box left, field_name), t: Type::Infer }
+    let mut find_type = |search_fields: Vec<(String, Type)>, search_name: String| {
+        for (f_n, f_t) in search_fields {
+            if f_n == search_name {
+                return Some(f_t);
+                break;
+            }
+        }
+        return None;
+    };
+
+    let t = match left.t.clone() {
+        Type::Union(_, fields) => find_type(fields.clone(), field_name.clone()),
+        Type::Struct(_, fields) => find_type(fields.clone(), field_name.clone()),
+        Type::Ptr(box inner) => match inner {
+            Type::Union(_, fields) => find_type(fields.clone(), field_name.clone()),
+            Type::Struct(_, fields) => find_type(fields.clone(), field_name.clone()),
+            _ => panic!("Unable to access field {} in {:?}", field_name, left),
+        }
+        _ => panic!("Unable to access field {} in {:?}", field_name, left),
+    };
+
+    if t.is_none() {
+        panic!("No such field {} in {:?}", field_name, left);
+    }
+
+    Expr { node: ExprKind::Member(box left, field_name), t: t.unwrap() }
 }
 
 fn parse_indexing(ctx: &mut ParsingContext, left: Expr) -> Expr {
@@ -181,6 +262,19 @@ fn parse_call(ctx: &mut ParsingContext, left: Expr) -> Expr {
 
     let mut args = Vec::new();
 
+    if let ExprKind::Identifier(xs) = left.node.clone() {
+        if xs == "sizeof" {
+            let arg = parse_type(ctx);
+            expect(ctx, RightParen);
+            let type_name = if let Type::Struct(struct_name, _) = arg.clone() {
+                format!("struct {}", struct_name)
+            } else {
+                panic!("Was unable to sizeof type {:?}", arg);
+            };
+            return Expr { node: ExprKind::Call(box left, vec![box Expr { node: ExprKind::Identifier(type_name), t: arg}]), t: Type::Unsigned(IntegerSize::I64)};
+        }
+    }
+
     if !accept(ctx, RightParen) {
         loop {
             let expr = parse_expression(ctx, 0);
@@ -199,7 +293,7 @@ fn parse_cast(ctx: &mut ParsingContext) -> Expr {
     expect(ctx, TokenType::Comma);
     let inner = parse_expression(ctx, 0);
     expect(ctx, TokenType::RightParen);
-    Expr { node: ExprKind::Cast(target, box inner), t: Type::Infer }
+    Expr { node: ExprKind::Cast(target.clone(), box inner), t: target }
 }
 
 fn get_current_precedence(ctx: &mut ParsingContext) -> u32 {
@@ -308,8 +402,10 @@ fn parse_variable_decl(ctx: &mut ParsingContext) -> Item {
     } else {
         None
     };
+    let name = identifier.lexeme.unwrap();
+    declare_symbol(&name, &_type, ctx);
     let node = ItemKind::VariableDecl(_type, expr);
-    Item {name: identifier.lexeme.unwrap(), node, line: identifier.line }
+    Item {name, node, line: identifier.line }
 }
 
 fn parse_const_decl(ctx: &mut ParsingContext) -> Item {
@@ -378,17 +474,20 @@ fn parse_block(ctx: &mut ParsingContext) -> Block {
 
     let mut stmts = Vec::new();
 
-    expect(ctx, LeftCurly);
-    while !accept(ctx, RightCurly) {
-        let stmt = parse_stmt(ctx);
-        stmts.push(stmt);
+    if look_ahead(ctx, 0).token_type == TokenType::LeftCurly {
+        expect(ctx, LeftCurly);
+        while ! accept(ctx, RightCurly) {
+            let stmt = parse_stmt(ctx);
+            stmts.push(stmt);
+        }
+        Block { stmts }
+    } else {
+        Block { stmts: vec![parse_stmt(ctx)] }
     }
-
-    Block { stmts }
 }
 
 fn parse_signature(ctx: &mut ParsingContext) -> Signature {
-    use self::TokenType::*;
+use self::TokenType::*;
 
     let mut inputs = Vec::new();
 
@@ -416,21 +515,42 @@ fn parse_signature(ctx: &mut ParsingContext) -> Signature {
     Signature { inputs, output }
 }
 
+fn signature_to_function_type(signature: &Signature) -> Type {
+    let mut types = Vec::new();
+    for (t,n) in &signature.inputs {
+        types.push(t.clone());
+    }
+    Type::Function(types, box signature.output.clone())
+}
+
 fn parse_function_decl(ctx: &mut ParsingContext) -> Item {
     use self::TokenType::*;
 
     let identifier = consume(ctx);
+    let name = identifier.lexeme.unwrap();
     expect(ctx, ColonColon);
     let signature = parse_signature(ctx);
+
+    declare_symbol(&name, &signature_to_function_type(&signature), ctx);
+
+    initialize_scope(signature.output.clone(), ctx);
+
+    for (input_type, input_name) in &signature.inputs {
+        declare_symbol(input_name, input_type, ctx);
+    }
+
     let block = if look_ahead(ctx, 0).token_type == LeftCurly {
         Some(box parse_block(ctx))
     } else {
         None
     };
 
+
+    finalize_scope(ctx);
+
     let node = ItemKind::FunctionDecl(box signature, block);
 
-    Item {name: identifier.lexeme.unwrap(), node, line: identifier.line }
+    Item {name, node, line: identifier.line }
 }
 
 fn parse_directive(ctx: &mut ParsingContext) -> Item {
@@ -457,17 +577,21 @@ fn parse_enum_decl(ctx: &mut ParsingContext) -> Item {
         if name_token.token_type != TokenType::Identifier {
             panic!("Expected variant identifier but got {:?}", name_token);
         }
-        let field_name = name_token.lexeme.unwrap();
-        variants.push(field_name);
+        let variant_name = name_token.lexeme.unwrap();
+        variants.push(variant_name);
         expect(ctx, TokenType::Comma);
     }
 
     let type_name = identifier.lexeme.unwrap();
-    let type_def = Type::Enum(type_name.clone(), variants);
+    let type_def = Type::Enum(type_name.clone(), variants.clone());
     if ctx.types.contains_key(&type_name) {
         panic!("Type {} defined multiple times!", type_name);
     }
     ctx.types.insert(type_name.clone(), type_def.clone());
+
+    for var in variants {
+        declare_symbol(&var, &type_def, ctx);
+    }
 
     Item {name: type_name, node: ItemKind::EnumDecl(type_def), line: identifier.line }
 }
@@ -494,12 +618,42 @@ fn parse_struct_decl(ctx: &mut ParsingContext) -> Item {
 
     let type_name = identifier.lexeme.unwrap();
     let type_def = Type::Struct(type_name.clone(), fields);
+    /*if ctx.types.contains_key(&type_name) {
+        panic!("Type {} defined multiple times!", type_name);
+    }*/
+    ctx.types.insert(type_name.clone(), type_def.clone());
+
+    Item {name: type_name, node: ItemKind::StructDecl(type_def), line: identifier.line }
+}
+
+fn parse_union_decl(ctx: &mut ParsingContext) -> Item {
+    let identifier = consume(ctx);
+    expect(ctx, TokenType::ColonColon);
+    expect(ctx, TokenType::Union);
+    expect(ctx, TokenType::LeftCurly);
+
+    let mut fields = Vec::new();
+
+    while !accept(ctx, TokenType::RightCurly) {
+        let name_token = consume(ctx);
+        if name_token.token_type != TokenType::Identifier {
+            panic!("Expected field identifier but got {:?}", name_token);
+        }
+        let field_name = name_token.lexeme.unwrap();
+        expect(ctx, TokenType::Colon);
+        let field_type = parse_type(ctx);
+        fields.push((field_name, field_type));
+        expect(ctx, TokenType::Semicolon);
+    }
+
+    let type_name = identifier.lexeme.unwrap();
+    let type_def = Type::Union(type_name.clone(), fields);
     if ctx.types.contains_key(&type_name) {
         panic!("Type {} defined multiple times!", type_name);
     }
     ctx.types.insert(type_name.clone(), type_def.clone());
 
-    Item {name: type_name, node: ItemKind::StructDecl(type_def), line: identifier.line }
+    Item {name: type_name, node: ItemKind::UnionDecl(type_def), line: identifier.line }
 }
 
 fn parse_item(ctx: &mut ParsingContext) -> Item {
@@ -516,6 +670,7 @@ fn parse_item(ctx: &mut ParsingContext) -> Item {
         ColonColon => match look_ahead(ctx, 2).token_type {
             Enum => parse_enum_decl(ctx),
             Struct => parse_struct_decl(ctx),
+            Union => parse_union_decl(ctx),
             Identifier | Equal => parse_const_decl(ctx),
             LeftParen => parse_function_decl(ctx),
             _ => panic!("Unexpected token {:?} in item on line {:?}", token.token_type, token.line)
@@ -527,7 +682,13 @@ fn parse_item(ctx: &mut ParsingContext) -> Item {
 }
 
 pub fn parse(tokens: Vec<Token>) -> Vec<Item> {
-    let mut ctx = ParsingContext {current: 0, tokens, types: HashMap::new()};
+
+    let global_scope = Scope { symbols: HashMap::new(), parent: 0, current_return_type: Type::Void };
+
+    let mut ctx = ParsingContext {current: 0, tokens, types: HashMap::new(), current_scope_arena: 0, scope_arena: vec![global_scope]};
+
+    declare_symbol(&String::from("sizeof"), &Type::Function(vec![Type::Void], box Type::Unsigned(IntegerSize::I64)), &mut ctx);
+    declare_symbol(&String::from("printf"), &Type::Function(vec![Type::Void], box Type::Void), &mut ctx);
 
     let mut ast = Vec::new();
     while !is_done(&mut ctx) {

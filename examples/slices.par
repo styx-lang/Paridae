@@ -1,3 +1,4 @@
+#include lib/prelude.par
 
 sum :: (data: []s8) -> s32 {
   i : s32 = 0;

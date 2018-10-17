@@ -22,6 +22,7 @@ pub enum TokenType {
     If,
     Return,
     Struct,
+    Union,
     While,
     //Operators and punctuation
     Plus,
@@ -86,6 +87,7 @@ pub fn is_keyword(s: &str) -> Option<TokenType> {
         "if" => Some(If),
         "return" => Some(Return),
         "struct" => Some(Struct),
+        "union" => Some(Union),
         "true" => Some(True),
         "while" => Some(While),
         _ => None

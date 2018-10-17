@@ -1,0 +1,310 @@
+// Copyright (c) 2018 Lasse Dissing
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+
+//C headers
+
+//stdlib.h
+malloc :: (size: u64) -> *void
+calloc :: (num: u64, size: u64) -> *void
+realloc :: (ptr: *void, new_size: u64) -> *void
+free :: (ptr: *void)
+
+exit :: (status: int)
+
+//stdio.h
+
+fopen :: (filename: *u8, mode: *u8) -> *void
+fclose :: (stream: *void)
+
+fseek :: (stream: *void, offset: u64, origin: s32) -> s32
+ftell :: (stream: *void) -> u64
+rewind :: (stream: *void)
+
+fread :: (ptr: *void, size: u64, count: u64, fp: *void) -> u64
+
+putchar :: (ch: s32) -> s32
+getchar :: () -> s32
+
+//string.h
+
+strlen :: (str: *u8) -> u64
+strcmp :: (lhs: *u8, rhs: *u8) -> s32
+strncmp :: (lhs: *u8, rhs: *u8, num: u64) -> s32
+
+//stdlib
+
+_paridae_slice :: struct {
+  ptr : *u8;
+  len : s32;
+}
+
+len :: (slice: _paridae_slice) -> s32 {
+  return slice.len;
+}
+
+make :: (size: u64) -> []u8 {
+  p : *u8 = cast(*u8, malloc(1024));
+  slice : _paridae_slice;
+  slice.ptr = p;
+  slice.len = size;
+  return slice;
+}
+
+delete :: (slice: []u8) {
+  p_slice : _paridae_slice = cast([]u8, slice);
+  free(p_slice.ptr);
+}
+
+c_str :: (s: []s8) -> *s8 {
+  raw : _paridae_slice = cast(_paridae_slice, s);
+  return cast(*s8, raw.ptr);
+}
+
+is_alphabetic :: (c: u8) -> bool {
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
+is_digit :: (c: u8) -> bool {
+  return c >= 48 && c <= 9;
+}
+
+is_alphanumeric :: (c: u8) -> bool {
+  return is_alphabetic(c) || is_digit(c);
+}
+
+//Tokens
+
+TokenType :: enum {
+  Invalid,
+  Identifier,
+  Directive,
+  EOF,
+  //Keywords
+  Break,
+  Continue,
+  Defer,
+  Enum,
+  Else,
+  If,
+  Return,
+  Struct,
+  While,
+  //Operators and punctuation
+  Plus,
+  Minus,
+  Star,
+  Slash,
+  Amp,
+  AmpAmp,
+  Bar,
+  BarBar,
+  Hat,
+  Equal,
+  EqualEqual,
+  Bang,
+  BangEqual,
+  Less,
+  LessEqual,
+  Greater,
+  GreaterEqual,
+  LeftParen,
+  RightParen,
+  LeftBracket,
+  RightBracket,
+  LeftCurly,
+  RightCurly,
+  Comma,
+  Dot,
+  Colon,
+  ColonColon,
+  Semicolon,
+  Arrow,
+  //Literals
+  Integer,
+  Float,
+  Char,
+  String,
+  True,
+  False,
+}
+
+Token :: struct {
+  type: TokenType;
+  position: u32;
+  lexeme: u32;
+}
+
+
+//Lexer
+
+
+LexingContext :: struct {
+  start: u64;
+  current: u64;
+  line: u64;
+  source: *u8;
+  source_len: u64;
+}
+
+is_done_lexing :: (ctx: *LexingContext) -> bool {
+  return ctx.current >= ctx.source_len;
+}
+
+peek_token :: (ctx: *LexingContext, offset: u64) -> u8 {
+  if is_done_lexing(ctx) return 0;
+  return ctx.source[ctx.current + offset];
+}
+
+advance :: (ctx: *LexingContext) -> u8 {
+  ctx.current = ctx.current + 1;
+  return ctx.source[ctx.current - 1];
+}
+
+add_simple_token :: (ctx: *LexingContext, t: TokenType) {
+  //Add token
+}
+
+add_lookahead_conditional_token :: (ctx: *LexingContext, expect: u8, first: TokenType, second: TokenType) {
+  t : TokenType;
+  if peek_token(ctx,0) == expect {
+    advance(ctx);
+    t = first;
+  } else {
+    t = second;
+  }
+  //Add token
+}
+
+get_lexeme :: (ctx: *LexingContext) -> *u8 {
+  //?
+  return 0;
+}
+
+add_lexeme_token :: (ctx: *LexingContext, lexeme: *u8, token_type: TokenType) {
+  //Add token
+}
+
+single_line_comment :: (ctx: *LexingContext) {
+  while (peek_token(ctx, 0) != 10 && !is_done_lexing(ctx)) advance(ctx);
+}
+
+is_keyword :: (s: *u8) -> TokenType {
+
+}
+
+lex_string :: (ctx: *LexingContext) {
+
+  start_line : u64 = ctx.line;
+  
+  while peek_token(ctx, 0) != 34 && !is_done_lexing(ctx) {
+    if peek_token(ctx, 0) == 10  ctx.line = ctx + 1;
+    advance(ctx);
+  }
+
+  if is_done_lexing(ctx) {
+    printf("Unterminated string starting on line %lu", start_line);
+    exit(-1);
+  }
+
+  //Consume closing "
+  advance(ctx);
+
+  lexeme : *u8 = get_lexeme(ctx);
+  add_lexeme_token(ctx, lexeme, String);
+}
+
+lex_number :: (ctx: *LexingContext) {
+           
+}
+
+lex_identifier :: (ctx: *LexingContext) {
+  while (is_alphanumeric(peek_token(ctx, 0)) || peek_token(ctx, 0) == 95) advance(ctx);
+  lexeme : *u8 = get_lexeme(ctx);
+  keyword : TokenType = is_keyword(lexeme);
+  if keyword != Invalid add_simple_token(ctx, keyword);
+  else add_lexeme_token(ctx, lexeme, Identifier);
+}
+
+scan_token :: (ctx: *LexingContext) {
+  c : u8 = advance(ctx);
+
+  //TODO Implement char literals such that we can replace the raw ASCII values here
+  //TODO A match statement would also be quite nice here
+  if c == 40 add_simple_token(ctx, LeftParen);
+  else if c == 41 add_simple_token(ctx, RightParen);
+  else if c == 91 add_simple_token(ctx, LeftBracket);
+  else if c == 93 add_simple_token(ctx, RightBracket);
+  else if c == 123 add_simple_token(ctx, LeftCurly);
+  else if c == 125 add_simple_token(ctx, RightCurly);
+  else if c == 43 add_simple_token(ctx, Plus);
+  else if c == 42 add_simple_token(ctx, Star);
+  else if c == 94 add_simple_token(ctx, Hat);
+  else if c == 59 add_simple_token(ctx, Semicolon);
+  else if c == 46 add_simple_token(ctx, Dot);
+  else if c == 44 add_simple_token(ctx, Comma);
+  else if c == 45 add_lookahead_conditional_token(ctx, 63, Arrow, Minus);
+  else if c == 58 add_lookahead_conditional_token(ctx, 58, ColonColon, Colon);
+  else if c == 61 add_lookahead_conditional_token(ctx, 61, EqualEqual, Equal);
+  else if c == 33 add_lookahead_conditional_token(ctx, 61, BangEqual, Bang);
+  else if c == 60 add_lookahead_conditional_token(ctx, 61, LessEqual, Less);
+  else if c == 62 add_lookahead_conditional_token(ctx, 61, GreaterEqual, Greater);
+  else if c == 38 add_lookahead_conditional_token(ctx, 38, AmpAmp, AmpAmp);
+  else if c == 124 add_lookahead_conditional_token(ctx, 38, BarBar, Bar);
+  else if c == 47 {
+    if peek_token(ctx, 0) == 47 single_line_comment(ctx);
+    else add_simple_token(ctx, Slash);
+  }
+  else if c == 32 || c ==  9 {}
+  else if c == 10 ctx.line = ctx.line + 1;
+  else if c == 34 lex_string(ctx);
+  else {
+    if is_digit(c) lex_number(ctx);
+    else if (is_alphabetic(c) || c == 95) lex_identifier(ctx);
+    else {
+      printf("Unexpected character %c on line %lu\n", c, ctx.line);
+      exit(-1);
+    }
+  }
+}
+
+lex :: (source: *u8, source_len: u64) {
+  ctx : *LexingContext = cast(*LexingContext, malloc(sizeof(LexingContext)));
+  ctx.source = source;
+  ctx.source_len = source_len;
+  ctx.start = 0;
+  ctx.current = 0;
+  ctx.line = 1;
+  while !is_done_lexing(ctx) {
+    ctx.start = ctx.current;
+    scan_token(ctx);
+  }
+}
+
+_paridae_entry :: () -> s32 {
+
+  fp: *void = fopen("src/compiler.par", "r");
+
+  if !fp {
+    return -1;
+  }
+
+  //Determine file size by seeking to the end of the file
+  fseek(fp, 0, 2); //SEEK_END = 2
+  filesize : u64 = ftell(fp);
+  rewind(fp);
+
+  printf("%lu\n", filesize);
+
+  source : *u8 = cast(*u8, malloc(filesize));
+
+  fread(source, filesize, 1, fp);
+
+  lex(source, filesize);
+
+  fclose(fp);
+  
+  return 0;
+}

@@ -200,7 +200,7 @@ fn scan_token(ctx: &mut LexingContext) {
             } else if c.is_alphabetic() || c == '_' {
                 identifier(ctx);
             } else {
-                panic!("Unexpected character {}", c);
+                panic!("Unexpected character {} on line {}", c, ctx.line);
             }
         }
     }
