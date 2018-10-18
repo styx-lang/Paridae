@@ -18,7 +18,9 @@ fn generate_literal(lit: LitKind, t: Type) -> String {
     match lit {
         Int(i) =>format!("{}", i),
         Str(s) => format!("\"{}\"", s), // TODO Stick with c strings for now
-        _ => panic!("Literal type not yet supported!")
+        Bool(b) => if b {String::from("1")} else {String::from("0")},
+        Float(f) => format!("{}", f),
+        _ => panic!("Literal type {:?} not yet supported!", t)
     }
 }
 
@@ -110,6 +112,7 @@ fn generate_condition(condition: Expr, then: Block, otherwise: Option<Box<Block>
     ctx.builder.push(format!("if ({})", condition_value));
     generate_block(then, ctx);
     if let Some(box o) = otherwise {
+        ctx.builder.push(String::from("else"));
         generate_block(o, ctx);
     }
     String::from("")
@@ -136,8 +139,9 @@ fn generate_array_index(array: Expr, index: Expr, ctx: &mut CodeGenContext) -> S
 
     if let Type::Ptr(_) = array_type {
         format!("{}[{}]", ptr, offset)
-    } else if let Type::Slice(_) = array_type {
-        format!("{}.ptr[{}*sizeof({})]", ptr, offset, "u8")
+    } else if let Type::Slice(box inner) = array_type {
+        let inner_str = get_type(inner, ctx);
+        format!("*(({}*) &({}.ptr[{}*sizeof({})]))", inner_str , ptr, offset, inner_str)
     } else {
         panic!("Indexing into {:?} not implemented", array_type);
     }

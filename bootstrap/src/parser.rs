@@ -147,6 +147,11 @@ fn parse_string_literal(ctx: &mut ParsingContext, token: Token) -> Expr {
     Expr {node: ExprKind::Literal(Box::new(LitKind::Str(s))), t: Type::Infer }
 }
 
+fn parse_bool_literal(ctx: &mut ParsingContext, token: Token) -> Expr {
+    let b = token.token_type == TokenType::True;
+    Expr {node: ExprKind::Literal(Box::new(LitKind::Bool(b))), t: Type::Bool}
+}
+
 fn parse_identifier(ctx: &mut ParsingContext, token: Token) -> Expr {
 
     let name = token.lexeme.unwrap();
@@ -222,9 +227,9 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
         Type::Ptr(box inner) => match inner {
             Type::Union(_, fields) => find_type(fields.clone(), field_name.clone()),
             Type::Struct(_, fields) => find_type(fields.clone(), field_name.clone()),
-            _ => panic!("Unable to access field {} in {:?}", field_name, left),
+            _ => panic!("Unable to access field \"{}\" in {:?}", field_name, left),
         }
-        _ => panic!("Unable to access field {} in {:?}", field_name, left),
+        _ => panic!("Unable to access field \"{}\" in {:?}", field_name, left),
     };
 
     if t.is_none() {
@@ -325,6 +330,7 @@ fn parse_expression(ctx: &mut ParsingContext, precedence: u32) -> Expr {
         Integer => parse_integer_literal(ctx, token.clone()),
         TokenType::String => parse_string_literal(ctx, token.clone()),
         Float => parse_float_literal(ctx, token.clone()),
+        False | True => parse_bool_literal(ctx, token.clone()),
         Minus | Bang | And | Star => parse_prefix_operator(ctx, token.clone()),
         LeftParen => {
             let inner = parse_expression(ctx, 0);

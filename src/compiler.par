@@ -33,8 +33,11 @@ getchar :: () -> s32
 strlen :: (str: *u8) -> u64
 strcmp :: (lhs: *u8, rhs: *u8) -> s32
 strncmp :: (lhs: *u8, rhs: *u8, num: u64) -> s32
+memcpy :: (dst: *void, src: *void, len: u64) -> *void
 
 //stdlib
+
+null : *u8 = 0;
 
 _paridae_slice :: struct {
   ptr : *u8;
@@ -46,7 +49,7 @@ len :: (slice: _paridae_slice) -> s32 {
 }
 
 make :: (size: u64) -> []u8 {
-  p : *u8 = cast(*u8, malloc(1024));
+  p : *u8 = cast(*u8, malloc(size));
   slice : _paridae_slice;
   slice.ptr = p;
   slice.len = size;
@@ -68,7 +71,7 @@ is_alphabetic :: (c: u8) -> bool {
 }
 
 is_digit :: (c: u8) -> bool {
-  return c >= 48 && c <= 9;
+  return c >= 48 && c <= 57;
 }
 
 is_alphanumeric :: (c: u8) -> bool {
@@ -78,63 +81,66 @@ is_alphanumeric :: (c: u8) -> bool {
 //Tokens
 
 TokenType :: enum {
-  Invalid,
-  Identifier,
-  Directive,
-  EOF,
-  //Keywords
-  Break,
-  Continue,
-  Defer,
-  Enum,
-  Else,
-  If,
-  Return,
-  Struct,
-  While,
-  //Operators and punctuation
-  Plus,
-  Minus,
-  Star,
-  Slash,
-  Amp,
-  AmpAmp,
-  Bar,
-  BarBar,
-  Hat,
-  Equal,
-  EqualEqual,
-  Bang,
-  BangEqual,
-  Less,
-  LessEqual,
-  Greater,
-  GreaterEqual,
-  LeftParen,
-  RightParen,
-  LeftBracket,
-  RightBracket,
-  LeftCurly,
-  RightCurly,
-  Comma,
-  Dot,
-  Colon,
-  ColonColon,
-  Semicolon,
-  Arrow,
-  //Literals
-  Integer,
-  Float,
-  Char,
-  String,
-  True,
-  False,
+    Invalid,
+    Identifier,
+    Directive,
+    EOF,
+    //Keywords
+    Break,
+    Cast,
+    Const,
+    Continue,
+    Defer,
+    Enum,
+    Else,
+    For,
+    If,
+    Return,
+    Struct,
+    Union,
+    While,
+    //Operators and punctuation
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    And,
+    AndAnd,
+    Or,
+    OrOr,
+    Hat,
+    Equal,
+    Bang,
+    BangEqual,
+    EqualEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+    LeftParen,
+    RightParen,
+    LeftBracket,
+    RightBracket,
+    LeftCurly,
+    RightCurly,
+    Comma,
+    Dot,
+    Colon,
+    ColonColon,
+    Semicolon,
+    Arrow,
+    //Literals
+    Integer,
+    Float,
+    String,
+    True,
+    False,
 }
 
 Token :: struct {
   type: TokenType;
   position: u32;
-  lexeme: u32;
+  lexeme: *u8;
 }
 
 
@@ -147,6 +153,8 @@ LexingContext :: struct {
   line: u64;
   source: *u8;
   source_len: u64;
+  tokens: []Token;
+  current_token_idx: u64;
 }
 
 is_done_lexing :: (ctx: *LexingContext) -> bool {
@@ -163,28 +171,41 @@ advance :: (ctx: *LexingContext) -> u8 {
   return ctx.source[ctx.current - 1];
 }
 
-add_simple_token :: (ctx: *LexingContext, t: TokenType) {
-  //Add token
+add_simple_token :: (ctx: *LexingContext, token_type: TokenType) {
+  token : *Token = &ctx.tokens[ctx.current_token_idx];
+  token.type = token_type;
+  token.lexeme = null;
+  token.position = ctx.line;
+  ctx.current_token_idx = ctx.current_token_idx + 1;
 }
 
 add_lookahead_conditional_token :: (ctx: *LexingContext, expect: u8, first: TokenType, second: TokenType) {
-  t : TokenType;
+  token : *Token = &ctx.tokens[ctx.current_token_idx];
+  token.lexeme = null;
+  token.position = ctx.line;
   if peek_token(ctx,0) == expect {
     advance(ctx);
-    t = first;
+    token.type = first;
   } else {
-    t = second;
+    token.type = second;
   }
-  //Add token
+  ctx.current_token_idx = ctx.current_token_idx + 1;
 }
 
 get_lexeme :: (ctx: *LexingContext) -> *u8 {
-  //?
-  return 0;
+  str_len: u64 = ctx.current - ctx.start;
+  str: *u8 = malloc(str_len + 1);
+  memcpy(str, &ctx.source[ctx.start], str_len);
+  str[str_len] = 0;
+  return str;
 }
 
 add_lexeme_token :: (ctx: *LexingContext, lexeme: *u8, token_type: TokenType) {
-  //Add token
+  token : *Token = &ctx.tokens[ctx.current_token_idx];
+  token.type = token_type;
+  token.lexeme = lexeme;
+  token.position = ctx.line;
+  ctx.current_token_idx = ctx.current_token_idx + 1;
 }
 
 single_line_comment :: (ctx: *LexingContext) {
@@ -192,7 +213,23 @@ single_line_comment :: (ctx: *LexingContext) {
 }
 
 is_keyword :: (s: *u8) -> TokenType {
+  //TODO Replace this with a hashtable or at least a match
 
+  if !strcmp(s, "break")  return Break;
+  if !strcmp(s, "cast")  return Cast;
+  if !strcmp(s, "continue")  return Continue;
+  if !strcmp(s, "defer")  return Defer;
+  if !strcmp(s, "enum")  return Enum;
+  if !strcmp(s, "else")  return Else;
+  if !strcmp(s, "false")  return False;
+  if !strcmp(s, "for")  return For;
+  if !strcmp(s, "if")  return If;
+  if !strcmp(s, "return")  return Return;
+  if !strcmp(s, "struct")  return Struct;
+  if !strcmp(s, "union")  return Union;
+  if !strcmp(s, "true")  return True;
+  if !strcmp(s, "while")  return While;
+  return Invalid;
 }
 
 lex_string :: (ctx: *LexingContext) {
@@ -200,7 +237,7 @@ lex_string :: (ctx: *LexingContext) {
   start_line : u64 = ctx.line;
   
   while peek_token(ctx, 0) != 34 && !is_done_lexing(ctx) {
-    if peek_token(ctx, 0) == 10  ctx.line = ctx + 1;
+    if peek_token(ctx, 0) == 10  ctx.line = ctx.line + 1;
     advance(ctx);
   }
 
@@ -217,7 +254,21 @@ lex_string :: (ctx: *LexingContext) {
 }
 
 lex_number :: (ctx: *LexingContext) {
-           
+
+  while is_digit(peek_token(ctx,0))  advance(ctx);
+  dot_encountered : bool = false;
+  if peek_token(ctx,0) == 46 && is_digit(peek_token(ctx,1)) {
+    dot_encountered = true;
+    advance(ctx);
+    while is_digit(peek_token(ctx,0))  advance(ctx);
+  }
+
+  lexeme : *u8 = get_lexeme(ctx);
+  t : TokenType; 
+  if dot_encountered  t = Float;
+  else  t = Integer;
+
+  add_lexeme_token(ctx, lexeme, t);
 }
 
 lex_identifier :: (ctx: *LexingContext) {
@@ -251,8 +302,8 @@ scan_token :: (ctx: *LexingContext) {
   else if c == 33 add_lookahead_conditional_token(ctx, 61, BangEqual, Bang);
   else if c == 60 add_lookahead_conditional_token(ctx, 61, LessEqual, Less);
   else if c == 62 add_lookahead_conditional_token(ctx, 61, GreaterEqual, Greater);
-  else if c == 38 add_lookahead_conditional_token(ctx, 38, AmpAmp, AmpAmp);
-  else if c == 124 add_lookahead_conditional_token(ctx, 38, BarBar, Bar);
+  else if c == 38 add_lookahead_conditional_token(ctx, 38, AndAnd, And);
+  else if c == 124 add_lookahead_conditional_token(ctx, 38, OrOr, Or);
   else if c == 47 {
     if peek_token(ctx, 0) == 47 single_line_comment(ctx);
     else add_simple_token(ctx, Slash);
@@ -264,23 +315,39 @@ scan_token :: (ctx: *LexingContext) {
     if is_digit(c) lex_number(ctx);
     else if (is_alphabetic(c) || c == 95) lex_identifier(ctx);
     else {
-      printf("Unexpected character %c on line %lu\n", c, ctx.line);
+      printf("Unexpected character %c = %d on line %lu\n", c, c, ctx.line);
       exit(-1);
     }
   }
 }
 
-lex :: (source: *u8, source_len: u64) {
+NUM_TOKENS : u32 = sizeof(Token) * 1024 * 1024;
+
+lex :: (source: *u8, source_len: u64) -> []Token {
+
+  tokens : []Token = cast([]Token, make(NUM_TOKENS));
+
   ctx : *LexingContext = cast(*LexingContext, malloc(sizeof(LexingContext)));
   ctx.source = source;
   ctx.source_len = source_len;
   ctx.start = 0;
   ctx.current = 0;
   ctx.line = 1;
+  ctx.tokens = tokens;
+  ctx.current_token_idx = 0;
+  
   while !is_done_lexing(ctx) {
     ctx.start = ctx.current;
     scan_token(ctx);
+    if ctx.current_token_idx >= NUM_TOKENS {
+      printf("Ran out of token storage!\n");
+      break;
+    }
   }
+
+  free(ctx);
+
+  return tokens;
 }
 
 _paridae_entry :: () -> s32 {
@@ -296,13 +363,13 @@ _paridae_entry :: () -> s32 {
   filesize : u64 = ftell(fp);
   rewind(fp);
 
-  printf("%lu\n", filesize);
-
   source : *u8 = cast(*u8, malloc(filesize));
 
   fread(source, filesize, 1, fp);
 
-  lex(source, filesize);
+  tokens : []Token = lex(source, filesize);
+
+  delete(tokens);
 
   fclose(fp);
   
