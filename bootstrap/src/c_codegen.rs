@@ -37,10 +37,21 @@ fn get_int_size_postfix(size: IntegerSize) -> String {
     }.to_string()
 }
 
+fn get_float_size_postfix(size: FloatingSize) -> String {
+    use self::FloatingSize::*;
+
+    match size {
+        F32 => "32",
+        F64 => "64",
+        Unspecified => "64",
+    }.to_string()
+}
+
 fn get_type(t: Type, ctx: &CodeGenContext) -> String {
     match t {
         Type::Void => "void".to_string(),
         Type::Signed(size) => format!("s{}", get_int_size_postfix(size)),
+        Type::Float(size) => format!("f{}", get_float_size_postfix(size)),
         Type::Unsigned(size) => format!("u{}", get_int_size_postfix(size)),
         Type::Bool => "int".to_string(),
         Type::Ptr(box inner) => format!("{}*", get_type(inner, ctx)),
@@ -82,6 +93,10 @@ fn generate_binary_operator(bin_op: BinaryOperatorKind, left: Expr, right: Expr,
         Subtraction => format!("({} - {})", lhs, rhs),
         Product => format!("({} * {})", lhs, rhs),
         Division => format!("({} / {})", lhs, rhs),
+        Modulus => format!("({} % {})", lhs, rhs),
+        LeftShift => format!("({} << {})", lhs, rhs),
+        RightShift => format!("({} >> {})", lhs, rhs),
+        Xor => format!("({} ^ {})", lhs, rhs),
         Equality => format!("({} == {})", lhs, rhs),
         NotEq => format!("({} != {})", lhs, rhs),
         Less => format!("({} < {})", lhs, rhs),
@@ -322,6 +337,8 @@ fn generate_prelude(ctx: &mut CodeGenContext) {
         "typedef short s16;",
         "typedef int s32;",
         "typedef long s64;",
+        "typedef float f32;",
+        "typedef double f64;",
         "int printf(const char* format, ...);",
     ];
     ctx.builder.push(prelude.join("\n"));

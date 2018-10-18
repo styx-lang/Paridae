@@ -167,6 +167,7 @@ fn scan_token(ctx: &mut LexingContext) {
         '}' => add_simple_token(ctx, RightCurly),
         '+' => add_simple_token(ctx, Plus),
         '*' => add_simple_token(ctx, Star),
+        '%' => add_simple_token(ctx, Percent),
         '^' => add_simple_token(ctx, Hat),
         ';' => add_simple_token(ctx, Semicolon),
         '.' => add_simple_token(ctx, Dot),
@@ -175,10 +176,25 @@ fn scan_token(ctx: &mut LexingContext) {
         ':' => add_lookahead_conditional_token(ctx, ':', ColonColon, Colon),
         '=' => add_lookahead_conditional_token(ctx, '=', EqualEqual, Equal),
         '!' => add_lookahead_conditional_token(ctx, '=', BangEqual, Bang),
-        '<' => add_lookahead_conditional_token(ctx, '=', LessEqual, Less),
-        '>' => add_lookahead_conditional_token(ctx, '=', GreaterEqual, Greater),
         '&' => add_lookahead_conditional_token(ctx, '&', AndAnd, And),
         '|' => add_lookahead_conditional_token(ctx, '|', OrOr, Or),
+        '<' => {
+            let t = match peek(ctx) {
+                '=' => {advance(ctx); LessEqual},
+                '<' => {advance(ctx); LessLess},
+                _ => Less
+            };
+            add_simple_token(ctx,t);
+        },
+        '>' => {
+            let t = match peek(ctx) {
+                '=' => {advance(ctx); GreaterEqual},
+                '>' => {advance(ctx); GreaterGreater},
+                _ => Less
+            };
+            add_simple_token(ctx,t);
+        },
+
         '/' => {
             let next = peek(ctx);
             if next == '/' {

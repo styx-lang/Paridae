@@ -13,7 +13,6 @@ use std::collections::HashMap;
 struct Scope {
     symbols: HashMap<String, Type>,
     parent: usize,
-    current_return_type: Type
 }
 
 struct ParsingContext {
@@ -24,8 +23,8 @@ struct ParsingContext {
     scope_arena: Vec<Scope>,
 }
 
-fn initialize_scope(return_type: Type, ctx: &mut ParsingContext) {
-    let new_scope = Scope { symbols: HashMap::new(), parent: ctx.current_scope_arena, current_return_type: return_type  } ;
+fn initialize_scope(ctx: &mut ParsingContext) {
+    let new_scope = Scope { symbols: HashMap::new(), parent: ctx.current_scope_arena } ;
     ctx.scope_arena.push(new_scope);
     ctx.current_scope_arena = ctx.scope_arena.len()-1;
 }
@@ -58,10 +57,6 @@ fn lookup_symbol(name: &String, ctx: &mut ParsingContext) -> Type {
         }
     }
     panic!("Failed to find symbol {}", name);
-}
-
-fn get_current_return_type(ctx: &mut ParsingContext) -> Type {
-    ctx.scope_arena[ctx.current_scope_arena].current_return_type.clone()
 }
 
 fn is_done(ctx: &mut ParsingContext) -> bool {
@@ -117,16 +112,20 @@ fn get_precedence(operator: BinaryOperatorKind) -> u32 {
     use ast::BinaryOperatorKind::*;
 
     match operator {
-        Product => 5,
-        Division => 5,
-        Addition => 4,
-        Subtraction => 4,
-        Less => 3,
-        LessEq => 3,
-        Greater => 3,
-        GreaterEq => 3,
-        Equality => 3,
-        NotEq => 3,
+        Product => 10,
+        Division => 10,
+        Modulus => 10,
+        Addition => 9,
+        Subtraction => 9,
+        LeftShift => 8,
+        RightShift => 8,
+        Xor => 6,
+        Less => 4,
+        LessEq => 4,
+        Greater => 4,
+        GreaterEq => 4,
+        Equality => 4,
+        NotEq => 4,
         Or => 2,
         And => 1
     }
@@ -183,6 +182,7 @@ fn convert_token_to_binary_operator(token: TokenType) -> Option<BinaryOperatorKi
         Minus => Some(BinaryOperatorKind::Subtraction),
         Star => Some(BinaryOperatorKind::Product),
         Slash => Some(BinaryOperatorKind::Division),
+        Percent => Some(BinaryOperatorKind::Modulus),
         Less => Some(BinaryOperatorKind::Less),
         LessEqual => Some(BinaryOperatorKind::LessEq),
         Greater => Some(BinaryOperatorKind::Greater),
@@ -191,6 +191,9 @@ fn convert_token_to_binary_operator(token: TokenType) -> Option<BinaryOperatorKi
         BangEqual => Some(BinaryOperatorKind::NotEq),
         AndAnd => Some(BinaryOperatorKind::And),
         OrOr => Some(BinaryOperatorKind::Or),
+        Hat => Some(BinaryOperatorKind::Xor),
+        LessLess => Some(BinaryOperatorKind::LeftShift),
+        GreaterGreater => Some(BinaryOperatorKind::RightShift),
         _ => None,
     }
 }
@@ -215,7 +218,6 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
         for (f_n, f_t) in search_fields {
             if f_n == search_name {
                 return Some(f_t);
-                break;
             }
         }
         return None;
@@ -233,7 +235,7 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
     };
 
     if t.is_none() {
-        panic!("No such field {} in {:?}", field_name, left);
+        panic!("No such field \"{}\" in {:?}", field_name, left);
     }
 
     Expr { node: ExprKind::Member(box left, field_name), t: t.unwrap() }
@@ -311,7 +313,7 @@ fn get_current_precedence(ctx: &mut ParsingContext) -> u32 {
         if let Some(op) = convert_token_to_binary_operator(token) {
             get_precedence(op)
         } else if token == LeftParen || token == Dot || token == LeftBracket {
-            8
+            12
         } else {
             0
         }
@@ -364,6 +366,8 @@ fn primitive_type_by_name(name: &String, ctx: &ParsingContext) -> Type {
         "u16" => Unsigned(IntegerSize::I16),
         "u32" => Unsigned(IntegerSize::I32),
         "u64" => Unsigned(IntegerSize::I64),
+        "f32" => Float(FloatingSize::F32),
+        "f64" => Float(FloatingSize::F64),
         "bool" => Bool,
         "char" => Char,
         "void" => Void,
@@ -539,7 +543,7 @@ fn parse_function_decl(ctx: &mut ParsingContext) -> Item {
 
     declare_symbol(&name, &signature_to_function_type(&signature), ctx);
 
-    initialize_scope(signature.output.clone(), ctx);
+    initialize_scope(ctx);
 
     for (input_type, input_name) in &signature.inputs {
         declare_symbol(input_name, input_type, ctx);
@@ -619,7 +623,7 @@ fn parse_struct_decl(ctx: &mut ParsingContext) -> Item {
         expect(ctx, TokenType::Colon);
         let field_type = parse_type(ctx);
         fields.push((field_name, field_type));
-        expect(ctx, TokenType::Semicolon);
+        expect(ctx, TokenType::Comma);
     }
 
     let type_name = identifier.lexeme.unwrap();
@@ -649,7 +653,7 @@ fn parse_union_decl(ctx: &mut ParsingContext) -> Item {
         expect(ctx, TokenType::Colon);
         let field_type = parse_type(ctx);
         fields.push((field_name, field_type));
-        expect(ctx, TokenType::Semicolon);
+        expect(ctx, TokenType::Comma);
     }
 
     let type_name = identifier.lexeme.unwrap();
@@ -689,7 +693,7 @@ fn parse_item(ctx: &mut ParsingContext) -> Item {
 
 pub fn parse(tokens: Vec<Token>) -> Vec<Item> {
 
-    let global_scope = Scope { symbols: HashMap::new(), parent: 0, current_return_type: Type::Void };
+    let global_scope = Scope { symbols: HashMap::new(), parent: 0};
 
     let mut ctx = ParsingContext {current: 0, tokens, types: HashMap::new(), current_scope_arena: 0, scope_arena: vec![global_scope]};
 

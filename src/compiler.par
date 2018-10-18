@@ -40,8 +40,8 @@ memcpy :: (dst: *void, src: *void, len: u64) -> *void
 null : *u8 = 0;
 
 _paridae_slice :: struct {
-  ptr : *u8;
-  len : s32;
+  ptr : *u8,
+  len : s32,
 }
 
 len :: (slice: _paridae_slice) -> s32 {
@@ -78,6 +78,61 @@ is_alphanumeric :: (c: u8) -> bool {
   return is_alphabetic(c) || is_digit(c);
 }
 
+//HashMap
+
+HashMap :: struct {
+  keys: []*void,
+  values: []*void,
+  size: u64,
+  load: u64,
+}
+
+hashmap_create :: (size: u64) -> *HashMap {
+  map : *HashMap = malloc(sizeof(HashMap));
+
+  map.size = size;
+  map.keys = cast([]u64, make(size*8));
+  map.values = cast([]*void, make(size*8));
+
+  return map;
+}
+
+hashmap_hash :: (key: *void) -> u64 {
+  ad : u64 = cast(u64, key);
+  return (ad ^ (ad >> 16));
+}
+
+hashmap_insert :: (map: *HashMap, key: *void, value: *void) {
+  h : u64 = hashmap_hash(key) % map.size;
+  if map.load + 1 >= map.size {
+    printf("Hashmap of size %lu is full!\n", map.size);
+    exit(-1);
+  }
+  while (true) {
+    if (map.keys[h] == key)  break;
+    if (map.keys[h] == null) {
+      map.keys[h] = key;
+      map.values[h] = value;
+      map.load = map.load + 1;
+    } else {
+      h = (h + 1) % map.size;
+    }
+  }
+}
+
+hashmap_lookup :: (map: *HashMap, key: *void) -> *void {
+  h : u64 = hashmap_hash(key) % map.size;
+  while (true) {
+    if (map.keys[h] == key)  return map.values[h];
+    if (map.keys[h] == null)  return null;
+    h = (h + 1) % map.size;
+  }
+}
+
+hashmap_destroy :: (map: *HashMap) {
+
+}
+
 //Tokens
 
 TokenType :: enum {
@@ -104,6 +159,9 @@ TokenType :: enum {
     Minus,
     Star,
     Slash,
+    Percent,
+    LessLess,
+    GreaterGreater,
     And,
     AndAnd,
     Or,
@@ -138,9 +196,9 @@ TokenType :: enum {
 }
 
 Token :: struct {
-  type: TokenType;
-  position: u32;
-  lexeme: *u8;
+  type: TokenType,
+  position: u32,
+  lexeme: *u8,
 }
 
 
@@ -148,13 +206,13 @@ Token :: struct {
 
 
 LexingContext :: struct {
-  start: u64;
-  current: u64;
-  line: u64;
-  source: *u8;
-  source_len: u64;
-  tokens: []Token;
-  current_token_idx: u64;
+  start: u64,
+  current: u64,
+  line: u64,
+  source: *u8,
+  source_len: u64,
+  tokens: []Token,
+  current_token_idx: u64,
 }
 
 is_done_lexing :: (ctx: *LexingContext) -> bool {
@@ -292,6 +350,7 @@ scan_token :: (ctx: *LexingContext) {
   else if c == 125 add_simple_token(ctx, RightCurly);
   else if c == 43 add_simple_token(ctx, Plus);
   else if c == 42 add_simple_token(ctx, Star);
+  else if c == 37 add_simple_token(ctx, Percent);
   else if c == 94 add_simple_token(ctx, Hat);
   else if c == 59 add_simple_token(ctx, Semicolon);
   else if c == 46 add_simple_token(ctx, Dot);
@@ -300,10 +359,20 @@ scan_token :: (ctx: *LexingContext) {
   else if c == 58 add_lookahead_conditional_token(ctx, 58, ColonColon, Colon);
   else if c == 61 add_lookahead_conditional_token(ctx, 61, EqualEqual, Equal);
   else if c == 33 add_lookahead_conditional_token(ctx, 61, BangEqual, Bang);
-  else if c == 60 add_lookahead_conditional_token(ctx, 61, LessEqual, Less);
-  else if c == 62 add_lookahead_conditional_token(ctx, 61, GreaterEqual, Greater);
   else if c == 38 add_lookahead_conditional_token(ctx, 38, AndAnd, And);
   else if c == 124 add_lookahead_conditional_token(ctx, 38, OrOr, Or);
+  else if c == 60 {
+     n1 : u8 = peek_token(ctx, 0);
+     if n1 == 60 {advance(ctx); add_simple_token(ctx, LessLess);}
+     else if n1 == 61 {advance(ctx); add_simple_token(ctx, LessEqual);}
+     else add_simple_token(ctx, Less);
+  }
+  else if c == 62 {
+     n2 : u8 = peek_token(ctx, 0);
+     if n2 == 62 {advance(ctx); add_simple_token(ctx, GreaterGreater);}
+     else if n2 == 61 {advance(ctx); add_simple_token(ctx, GreaterEqual);}
+     else add_simple_token(ctx, Less);
+  }
   else if c == 47 {
     if peek_token(ctx, 0) == 47 single_line_comment(ctx);
     else add_simple_token(ctx, Slash);
@@ -350,6 +419,393 @@ lex :: (source: *u8, source_len: u64) -> []Token {
   return tokens;
 }
 
+//AST
+
+//Forward declarations
+
+AstType :: struct {}
+Expr :: struct {}
+Stmt :: struct {}
+Item :: struct {}
+Block :: struct {}
+
+IntegerSize :: enum {
+  I8,
+  I16,
+  I32,
+  I64,
+  Int_Arch,
+  Int_Unspecified,
+}
+
+FloatingSize :: enum {
+  F32,
+  F64,
+  Float_Unspecified,
+}
+
+AstTypeKind :: enum {
+  Type_Bool,
+  Type_Signed,
+  Type_Unsigned,
+  Type_Float,
+  Type_Char,
+  Type_Array,
+  Type_Slice,
+  Type_Ptr,
+  Type_Void,
+  Type_Function,
+  Type_Struct,
+  Type_Union,
+  Type_Enum,
+  Type_Infer,
+}
+
+AstTypeNode :: union {
+  integer: IntegerSize,
+  floating: FloatingSize,
+  slice: *AstType,
+  ptr: *AstType,
+  function: *AstType,
+  _struct: *AstType,
+  _union: *AstType,
+  _enum: *AstType,
+}
+
+AstType :: struct {
+  tag: AstTypeKind,
+  node: AstTypeNode,
+}
+
+LiteralKind :: enum {
+  Lit_Int,
+  Lit_Float,
+  Lit_Bool,
+  Lit_Str,
+}
+
+LiteralValue :: union {
+  floating: f64,
+  integer: u64,
+  boolean: bool,
+  str: *u8,
+}
+
+Literal :: struct {
+  tag: LiteralKind,
+  val: LiteralValue,
+}
+
+
+UnaryOperatorKind :: enum {
+  // "*" operator for dereferencing pointers
+  UnaryDeref,
+  // "&" operator for taking the address of a place
+  UnaryRefer,
+  // "-" operator for numerical negation
+  UnaryNegation,
+  // "!" for logical not
+  UnaryComplement,
+}
+
+BinaryOperatorKind :: enum {
+  //Aritmetic operators
+  Bin_Addition,
+  Bin_Subtraction,
+  Bin_Product,
+  Bin_Division,
+  Bin_Modulus,
+
+  //Comperative operators
+  Bin_Less,
+  Bin_LessEq,
+  Bin_Greater,
+  Bin_GreaterEq,
+  Bin_Equality,
+  Bin_NotEq,
+
+  //Bitwise operators
+  Bin_BAnd,
+  Bin_BOr,
+  Bin_BXor,
+  Bin_LeftShift,
+  Bin_RightShift,
+
+  //Logical operators
+  Bin_And,
+  Bin_Or,
+}
+
+BinaryExpr :: struct {
+  operator: BinaryOperatorKind,
+  left: *Expr,
+  right: *Expr,
+}
+
+CastExpr :: struct {
+  target_type: AstType,
+  inner: *Expr,
+}
+
+CallExpr :: struct {
+  func: *Expr,
+  args: []Expr,
+}
+
+ConditionalExpr :: struct {
+  condition: *Expr,
+  then: *Block,
+  otherwise: *Block,
+}
+
+IndexingExpr :: struct {
+  array: *Expr,
+  index: *Expr,
+}
+
+FieldExpr :: struct {
+  strct: *Expr,
+  field_name: *u8,
+}
+
+UnaryExpr :: struct {
+  operator: UnaryOperatorKind,
+  inner: *Expr,
+}
+
+ExprNode :: union {
+  binary: BinaryExpr,
+  _cast: CastExpr,
+  call: CallExpr,
+  identifier: *u8,
+  conditional: ConditionalExpr,
+  index: IndexingExpr,
+  literal: Literal,
+  field: FieldExpr,
+  unary: UnaryExpr,
+}
+
+ExprKind :: enum {
+  Expr_Binary,
+  Expr_Cast,
+  Expr_Call,
+  Expr_Identifier,
+  Expr_Conditional,
+  Expr_Indexing,
+  Expr_Literal,
+  Expr_Field,
+  Expr_Unary,
+}
+
+Expr :: struct {
+  tag: ExprKind,
+  node: ExprNode,
+}
+
+
+AssignmentStmt :: struct {
+  lhs: *Expr,
+  rhs: *Expr,
+}
+
+WhileStmt :: struct {
+  condition: *Expr,
+  body: *Block,
+}
+
+StmtNode :: union {
+  assignment: AssignmentStmt,
+  item: *Item,
+  expr: *Expr,
+  _return: *Expr,
+  _defer: *Expr,
+  _while: WhileStmt,
+}
+
+StmtKind :: enum {
+  Stmt_Assignment,
+  Stmt_Item,
+  Stmt_Expr,
+  Stmt_Return,
+  Stmt_Break,
+  Stmt_Continue,
+  Stmt_Defer,
+  Stmt_While,
+  Stmt_Empty,
+}
+
+Stmt :: struct {
+  tag: StmtKind,
+  node: StmtNode,
+}
+
+Block :: struct {
+  stmts: []Stmt,
+}
+
+Signature :: struct {
+  input_types: []AstType,
+  input_name: []*u8,
+  output: AstType,
+}
+
+FunctionDecl :: struct {
+  signature: Signature,
+  block: *Block,
+}
+
+VariableDecl :: struct {
+  type: AstType,
+  value: *Expr,
+}
+
+ItemKind :: union {
+  function: FunctionDecl,
+  variable: VariableDecl,
+  _struct: AstType,
+  _union: AstType,
+  _enum: AstType,
+}
+
+Item :: struct {
+  name: *u8,
+  node: ItemKind,
+}
+
+//Parser
+
+ParsingContext :: struct {
+  current_token: u64,
+  tokens: []Token,
+  items: []Item,
+}
+
+NUM_ITEMS : u64 = 1024*1024;
+
+is_done_parsing :: (ctx: *ParsingContext) -> bool {
+  return ctx.current_token == len(ctx.tokens);
+}
+
+accept :: (ctx: *ParsingContext, token: TokenType) -> bool {
+  tok : Token = ctx.tokens[ctx.current_token];
+  if !is_done_parsing(ctx) && tok.type == token {
+    ctx.current_token = ctx.current_token + 1;
+    return true;
+  }
+  return false;
+}
+
+expect :: (ctx: *ParsingContext, token: TokenType) -> bool {
+  if accept(ctx, token) {
+    return true;
+  } else {
+    tok : Token = ctx.tokens[ctx.current_token];
+    printf("Expected %d but got %d\n on line %d", token, tok.type, tok.position);
+    exit(-1);
+  }
+}
+
+look_ahead :: (ctx: *ParsingContext, offset: u64) -> Token {
+  if ctx.current_token == len(ctx.tokens) {
+    eof_tok : Token;
+    eof_tok.type = EOF;
+    return eof_tok;
+  } else  return ctx.tokens[ctx.current_token + offset];
+}
+
+consume :: (ctx: *ParsingContext) -> Token {
+  ctx.current_token = ctx.current_token + 1;
+  return ctx.tokens[ctx.current_token - 1];
+}
+
+parse_type :: (ctx: *ParsingContext) -> AstType {
+  node: AstTypeNode;
+  kind: AstTypeKind;
+
+  token: Token = consume(ctx);
+  if token.type == Identifier {
+    ??
+  } else if token.type == Star {
+    inner: Type = consume(ctx);
+    kind = Type_Ptr;
+    
+  }
+
+  
+  type: AstType;
+}
+
+parse_variable_decl :: (ctx: *ParsingContext) -> Item {
+  identifier : Token = consume(ctx);
+  expect(ctx, Colon);
+
+
+  var_decl: VariableDecl;
+ 
+  if accept(ctx, Equal)  var_decl.type = Type_Infer;
+  else  var_decl.type = parse_type(ctx);
+
+  if accept(ctx, Equal)  var_decl.expr = parse_expression(ctx, 0);
+  else  var_decl.expr = null;
+
+  item: Item;
+  item.name = identifier.lexeme;
+  kind: ItemKind;
+  kind.variable = var_decl;
+  return item;
+}
+
+parse_item :: (ctx: *ParsingContext) -> Item {
+  token : Token = look_ahead(ctx, 0);
+  if token.type != Identifier {
+    printf("Tried to parse an item starting with a %d on line %d\n", token.type, token.position);
+    exit(-1);
+  }
+
+  result : Item;
+
+  look1 : Token = look_ahead(ctx, 1);
+  if look1.type == Colon  result = parse_variable_decl(ctx);
+  else if look1.type == ColonColon {
+    look2 : Token = look_ahead(ctx, 2); 
+    if look2.type == Enum  parse_enum_decl(ctx);
+    else if look2.type == Struct  parse_struct_decl(ctx);
+    else if look2.type == Union  parse_union_decl(ctx);
+    else if look2.type == LeftParen  parse_function_decl(ctx);
+    else {
+      printf("Unexpected token %d in item on line %d", look2.type, token.position);
+      exit(-1);
+    }
+  }
+  else {
+    printf("Unexpected token %d in item on line %d", look1.type, token.position);
+    exit(-1);
+  }
+}
+
+parse :: (tokens: []Token) -> []Item {
+  items : []Item = cast([]Item, make(NUM_ITEMS*sizeof(Item)));
+  ctx : *ParsingContext = malloc(sizeof(ParsingContext));
+  ctx.current_token = 0;
+  ctx.tokens = tokens;
+  ctx.items = items;
+
+  i : int = 0;
+  while !is_done_parsing(ctx) {
+    items[i] = parse_item(ctx);
+    i = i +1;
+    if i == NUM_ITEMS {
+      printf("Ran out of storage of items!\n");
+      break;
+    }
+  }
+
+  free(ctx);
+  return items;
+}
+
+//Driver
+
 _paridae_entry :: () -> s32 {
 
   fp: *void = fopen("src/compiler.par", "r");
@@ -369,7 +825,10 @@ _paridae_entry :: () -> s32 {
 
   tokens : []Token = lex(source, filesize);
 
+  items : []Item = parse(tokens);
+
   delete(tokens);
+  delete(items);
 
   fclose(fp);
   

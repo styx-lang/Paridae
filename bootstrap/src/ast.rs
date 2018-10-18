@@ -138,6 +138,7 @@ pub enum BinaryOperatorKind {
     Subtraction,
     Product,
     Division,
+    Modulus,
     Less,
     LessEq,
     Greater,
@@ -145,7 +146,10 @@ pub enum BinaryOperatorKind {
     Equality,
     NotEq,
     And,
-    Or
+    Or,
+    Xor,
+    LeftShift,
+    RightShift,
 }
 
 #[derive(Debug, Clone)]
