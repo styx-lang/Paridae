@@ -14,6 +14,9 @@ free :: (ptr: *void)
 
 exit :: (status: int)
 
+atoi :: (str: *u8) -> int
+atof :: (str: *u8) -> f64
+
 //stdio.h
 
 fopen :: (filename: *u8, mode: *u8) -> *void
@@ -37,7 +40,7 @@ memcpy :: (dst: *void, src: *void, len: u64) -> *void
 
 //stdlib
 
-null : *u8 = 0;
+null : *void = 0;
 
 _paridae_slice :: struct {
   ptr : *u8,
@@ -53,6 +56,13 @@ make :: (size: u64) -> []u8 {
   slice : _paridae_slice;
   slice.ptr = p;
   slice.len = size;
+  return slice;
+}
+
+realloc_slice :: (slice: []u8, new_size: u64) -> []u8 {
+  p_slice : _paridae_slice = cast([]u8, slice);
+  realloc(p_slice.ptr, new_size);
+
   return slice;
 }
 
@@ -449,15 +459,12 @@ AstTypeKind :: enum {
   Type_Signed,
   Type_Unsigned,
   Type_Float,
-  Type_Char,
   Type_Array,
   Type_Slice,
   Type_Ptr,
   Type_Void,
   Type_Function,
-  Type_Struct,
-  Type_Union,
-  Type_Enum,
+  Type_DataStructure,
   Type_Infer,
 }
 
@@ -467,9 +474,7 @@ AstTypeNode :: union {
   slice: *AstType,
   ptr: *AstType,
   function: *AstType,
-  _struct: *AstType,
-  _union: *AstType,
-  _enum: *AstType,
+  data_structure: *u8,
 }
 
 AstType :: struct {
@@ -499,16 +504,17 @@ Literal :: struct {
 
 UnaryOperatorKind :: enum {
   // "*" operator for dereferencing pointers
-  UnaryDeref,
+  Unary_Deref,
   // "&" operator for taking the address of a place
-  UnaryRefer,
+  Unary_Refer,
   // "-" operator for numerical negation
-  UnaryNegation,
+  Unary_Negation,
   // "!" for logical not
-  UnaryComplement,
+  Unary_Complement,
 }
 
 BinaryOperatorKind :: enum {
+  Bin_Invalid, //Temporary until we get option types
   //Aritmetic operators
   Bin_Addition,
   Bin_Subtraction,
@@ -543,13 +549,13 @@ BinaryExpr :: struct {
 }
 
 CastExpr :: struct {
-  target_type: AstType,
+  target_type: *AstType,
   inner: *Expr,
 }
 
 CallExpr :: struct {
   func: *Expr,
-  args: []Expr,
+  args: []*Expr,
 }
 
 ConditionalExpr :: struct {
@@ -640,13 +646,13 @@ Stmt :: struct {
 }
 
 Block :: struct {
-  stmts: []Stmt,
+  stmts: []*Stmt,
 }
 
 Signature :: struct {
-  input_types: []AstType,
+  input_types: []*AstType,
   input_name: []*u8,
-  output: AstType,
+  output: *AstType,
 }
 
 FunctionDecl :: struct {
@@ -655,16 +661,13 @@ FunctionDecl :: struct {
 }
 
 VariableDecl :: struct {
-  type: AstType,
+  type: *AstType,
   value: *Expr,
 }
 
 ItemKind :: union {
   function: FunctionDecl,
   variable: VariableDecl,
-  _struct: AstType,
-  _union: AstType,
-  _enum: AstType,
 }
 
 Item :: struct {
@@ -718,21 +721,340 @@ consume :: (ctx: *ParsingContext) -> Token {
   return ctx.tokens[ctx.current_token - 1];
 }
 
-parse_type :: (ctx: *ParsingContext) -> AstType {
+simple_type_by_name :: (name: *u8) -> *AstType {
+  node: AstTypeNode;
+  kind: AstTypeKind;
+  if !strcmp("int", name) { kind = Type_Signed; node.integer = I32; }
+  else if !strcmp("float", name) { kind = Type_Float; node.floating = F64; }
+  else if !strcmp("s8", name) { kind = Type_Signed; node.integer = I8; }
+  else if !strcmp("s16", name) { kind = Type_Signed; node.integer = I16; }
+  else if !strcmp("s32", name) { kind = Type_Signed; node.integer = I32; }
+  else if !strcmp("s64", name) { kind = Type_Signed; node.integer = I64; }
+  else if !strcmp("u8", name) { kind = Type_Unsigned; node.integer = I8; }
+  else if !strcmp("u16", name) { kind = Type_Unsigned; node.integer = I16; }
+  else if !strcmp("u32", name) { kind = Type_Unsigned; node.integer = I32; }
+  else if !strcmp("u64", name) { kind = Type_Unsigned; node.integer = I64; }
+  else if !strcmp("f32", name) { kind = Type_Unsigned; node.integer = F32; }
+  else if !strcmp("f64", name) { kind = Type_Float; node.floating = F64; }
+  else if !strcmp("f64", name) { kind = Type_Float; node.floating = F64; }
+  else if !strcmp("bool", name) { kind = Type_Bool; }
+  else if !strcmp("void", name) { kind = Type_Void; }
+  else { kind = Type_DataStructure; node.data_structure = name; }
+  type: *AstType = malloc(sizeof(AstType));
+  type.tag = kind;
+  type.node = node;
+  return type;
+}
+
+parse_type :: (ctx: *ParsingContext) -> *AstType {
   node: AstTypeNode;
   kind: AstTypeKind;
 
   token: Token = consume(ctx);
   if token.type == Identifier {
-    ??
+    return simple_type_by_name(token.lexeme);
   } else if token.type == Star {
-    inner: Type = consume(ctx);
     kind = Type_Ptr;
-    
+    node.ptr = parse_type(ctx);
+  } else if token.type == LeftBracket {
+    expect(ctx, RightBracket);
+    kind = Type_Slice;
+    node.slice = parse_type(ctx);
+  } else {
+    printf("Expected type but got %d on line %d", token.type, token.position);
+    exit(-1);
+  }
+  
+  type: *AstType = malloc(sizeof(AstType));
+  type.tag = kind;
+  type.node = node;
+
+  return type;
+}
+
+get_infer_type :: () -> *AstType {
+  type: *AstType = malloc(sizeof(AstType));
+  type.tag = Type_Infer;
+  return type;
+}
+
+convert_token_to_binary_operator :: (tok: TokenType) -> BinaryOperatorKind {
+  if tok == Plus  return Bin_Addition;
+  else if tok == Minus  return Bin_Subtraction;
+  else if tok == Star  return Bin_Product;
+  else if tok == Slash  return Bin_Division;
+  else if tok == Percent  return Bin_Modulus;
+  else if tok == Less  return Bin_Less;
+  else if tok == LessEqual  return Bin_LessEq;
+  else if tok == Greater  return Bin_Greater;
+  else if tok == GreaterEqual  return Bin_GreaterEq;
+  else if tok == EqualEqual  return Bin_Equality;
+  else if tok == BangEqual  return Bin_NotEq;
+  else if tok == AndAnd  return Bin_And;
+  else if tok == OrOr  return Bin_Or;
+  else if tok == And  return Bin_BAnd;
+  else if tok == Or  return Bin_BOr;
+  else if tok == Hat  return Bin_BXor;
+  else if tok == LessLess  return Bin_LeftShift;
+  else if tok == LessLess  return Bin_RightShift;
+  else  return Bin_Invalid;
+
+}
+
+get_binary_operator_precedence :: (op: BinaryOperatorKind) -> u32 {
+  if op == Bin_Product  return 10;
+  else if op == Bin_Division  return 10;
+  else if op == Bin_Modulus  return 10;
+  else if op == Bin_Addition  return 9;
+  else if op == Bin_Subtraction  return 9;
+  else if op == Bin_LeftShift  return 8;
+  else if op == Bin_RightShift  return 8;
+  else if op == Bin_BAnd  return 7;
+  else if op == Bin_BXor  return 6;
+  else if op == Bin_BOr  return 5;
+  else if op == Bin_Less  return 4;
+  else if op == Bin_LessEq  return 4;
+  else if op == Bin_Greater  return 4;
+  else if op == Bin_GreaterEq  return 4;
+  else if op == Bin_Equality  return 4;
+  else if op == Bin_NotEq  return 4;
+  else if op == Bin_And  return 3;
+  else if op == Bin_Or  return 2;
+  else {
+    printf("%d is not a binary operator!\n", op);
+    exit(-1);
+  }
+}
+
+get_current_precedence :: (ctx: *ParsingContext) -> u32 {
+
+  if len(ctx.tokens) <= ctx.current_token {
+    return 0;
+  } else {
+    tok : Token = ctx.tokens[ctx.current_token];
+    bin_op_precedence : u32 = get_binary_operator_precedence(convert_token_to_binary_operator(tok.type));
+    if bin_op_precedence >= 0  return bin_op_precedence;
+    else if tok.type == Dot  return 13;
+    else if (tok.type == LeftBracket || tok.type == LeftParen)  return 12;
+    else  return 0;
+  }
+}
+
+parse_expression :: (ctx: *ParsingContext, precedence: u32) -> *Expr
+
+parse_integer_literal :: (ctx: *ParsingContext, tok: Token) -> *Expr {
+  expr : *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Literal;
+  expr.node.literal.tag = Lit_Int;
+  expr.node.literal.val.integer = atoi(tok.lexeme);
+  return expr;
+}
+
+parse_float_literal :: (ctx: *ParsingContext, tok: Token) -> *Expr {
+  expr : *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Literal;
+  expr.node.literal.tag = Lit_Float;
+  expr.node.literal.val.floating = atof(tok.lexeme);
+  return expr;
+}
+
+parse_string_literal :: (ctx: *ParsingContext, tok: Token) -> *Expr {
+  expr : *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Literal;
+  expr.node.literal.tag = Lit_Str;
+  expr.node.literal.val.str = tok.lexeme;
+  return expr;
+}
+
+parse_bool_literal :: (ctx: *ParsingContext, tok: Token) -> *Expr {
+  expr : *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Literal;
+  expr.node.literal.tag = Lit_Bool;
+  expr.node.literal.val.boolean = strcmp("false", tok.lexeme);
+  return expr;
+}
+
+parse_identifier :: (ctx: *ParsingContext, tok: Token) -> *Expr {
+  expr : *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Identifier;
+  expr.node.identifier = tok.lexeme;
+  return expr;
+}
+
+parse_call :: (ctx: *ParsingContext, left: *Expr) -> *Expr {
+
+  result : *Expr = malloc(sizeof(Expr));
+  result.tag = Expr_Call;
+  result.node.call.func = left;
+  result.node.call.args = cast([]*Expr, make(10*8)); //TODO Use dynamic growing array
+
+  if !accept(ctx, RightParen) {
+    i : u32 = 0;
+    while true {
+      expr : *Expr = parse_expression(ctx, 0);
+      result.node.call.args[i] = expr;
+      if !accept(ctx, Comma)  break;
+      i = i + 1;
+    }
+    expect(ctx, RightParen);
   }
 
-  
-  type: AstType;
+  return result;
+
+}
+
+parse_cast :: (ctx: *ParsingContext) -> *Expr {
+
+  expr : *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Cast;
+   
+  expect(ctx, LeftParen);
+  expr.node._cast.target_type = parse_type(ctx);
+  expect(ctx, Comma);
+  expr.node._cast.inner = parse_expression(ctx, 0);
+  expect(ctx, RightParen);
+ 
+  return expr;
+}
+
+parse_prefix_operator :: (ctx: *ParsingContext, tok: Token) -> *Expr {
+  expr: *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Unary;
+
+  if tok.type == Minus  expr.node.unary.operator = Unary_Negation;
+  if tok.type == Bang  expr.node.unary.operator = Unary_Complement;
+  if tok.type == And  expr.node.unary.operator = Unary_Refer;
+  if tok.type == Star  expr.node.unary.operator = Unary_Deref;
+
+  expr.node.unary.inner = parse_expression(ctx, 11);
+
+  return expr;
+}
+
+parse_binary_operator :: (ctx: *ParsingContext, left: *Expr, operator: BinaryOperatorKind) -> *Expr {
+  precedence: u32 = get_binary_operator_precedence(operator);
+  right: *Expr = parse_expression(ctx, precedence);
+
+  expr: *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Binary;
+  expr.node.binary.operator = operator;
+  expr.node.binary.left = left;
+  expr.node.binary.right = right;
+
+  return expr;
+}
+
+parse_field_access :: (ctx: *ParsingContext, left: *Expr) -> *Expr {
+  field_token: Token = consume(ctx);
+  if field_token.type != Identifier {
+    printf("Token %d on line %d is not a valid field\n", field_token.type, field_token.position);
+    exit(-1);
+  }
+
+  expr: *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Field;
+  expr.node.field.field_name = field_token.lexeme;
+  expr.node.field.strct = left;
+
+  return expr;
+}
+
+parse_indexing :: (ctx: *ParsingContext, left: *Expr) -> *Expr {
+
+  expr: *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Indexing;
+  expr.node.index.index = parse_expression(ctx, 0);
+  expr.node.index.array = left;
+  return expr;
+}
+
+parse_infix_operator :: (ctx: *ParsingContext, left: *Expr, tok: Token) -> *Expr {
+
+  if tok.type == LeftParen  return parse_call(ctx, left);
+  if tok.type == Dot  return parse_field_access(ctx, left);
+  if tok.type == LeftBracket  return parse_indexing(ctx, left);
+
+  op : BinaryOperatorKind = convert_token_to_binary_operator(tok.type);
+  if op != Bin_Invalid {
+    return parse_binary_operator(ctx, left, op);
+  } else {
+    printf("Unsupported infix operator: %d on line %d\n", tok.type, tok.position);
+    exit(-1);
+  }
+}
+
+parse_block :: (ctx: *ParsingContext) -> *Block
+
+parse_if :: (ctx: *ParsingContext) -> *Expr {
+
+  expr: *Expr = malloc(sizeof(Expr));
+  expr.tag = Expr_Conditional;
+  expr.node.conditional.condition = parse_expression(ctx, 0);
+  expr.node.conditional.then = parse_block(ctx);
+
+  if accept(ctx, Else) {
+    expr.node.conditional.otherwise = parse_block(ctx);
+  } else {
+    expr.node.conditional.otherwise = null;
+  }
+
+  return expr;
+}
+
+parse_expression :: (ctx: *ParsingContext, precedence: u32) -> *Expr {
+  tok: Token = consume(ctx);
+
+  left : *Expr;
+
+  if tok.type == Cast  left = parse_cast(ctx);
+  else if tok.type == Identifier  left = parse_identifier(ctx, tok);
+  else if tok.type == Integer  left = parse_integer_literal(ctx, tok);
+  else if tok.type == String  left = parse_string_literal(ctx, tok);
+  else if tok.type == Float  left = parse_float_literal(ctx, tok);
+  else if (tok.type == False || tok.type == True)  left = parse_bool_literal(ctx, tok);
+  else if (tok.type == Minus || tok.type == Bang || tok.type == And || tok.type == Star) left = parse_prefix_operator(ctx, tok);
+  else if tok.type == If  left = parse_if(ctx);
+  else if tok.type == LeftParen {
+    left = parse_expression(ctx, 0);
+    expect(ctx, RightParen);
+  } else {
+    printf("%d is not a valid expression prefix on line %d\n", tok.type, tok.position);
+  }
+
+  while precedence < get_current_precedence(ctx) {
+    next_tok : Token = consume(ctx);
+    left = parse_infix_operator(ctx, left, next_tok);
+  }
+
+  return left;
+}
+
+parse_stmt :: (ctx: *ParsingContext) -> *Stmt
+
+parse_block :: (ctx: *ParsingContext) -> *Block {
+
+  block : *Block = malloc(sizeof(Block));
+
+  stmts_len : u32 = 2;
+  block.stmts = cast([]*Stmt, make(stmts_len * sizeof(Stmt)));
+
+  next : Token = look_ahead(ctx, 0);
+  if next.type == LeftCurly {
+    expect(ctx, LeftCurly);
+    i : u32 = 0;
+    while !accept(ctx, RightCurly) {
+      if i >= stmts_len {
+        stmts_len = 2 * stmts_len;
+        block.stmts = realloc_slice(block.stmts, stmts_len * sizeof(Stmt));
+      }
+      block.stmts[i] = parse_stmt(ctx);
+      i = i + 1;
+    }
+  } else {
+    block.stmts[0] = parse_stmt(ctx); 
+  }
+
+  return block;
 }
 
 parse_variable_decl :: (ctx: *ParsingContext) -> Item {
@@ -742,17 +1064,33 @@ parse_variable_decl :: (ctx: *ParsingContext) -> Item {
 
   var_decl: VariableDecl;
  
-  if accept(ctx, Equal)  var_decl.type = Type_Infer;
+  if accept(ctx, Equal)  var_decl.type = get_infer_type();
   else  var_decl.type = parse_type(ctx);
 
-  if accept(ctx, Equal)  var_decl.expr = parse_expression(ctx, 0);
-  else  var_decl.expr = null;
+  if accept(ctx, Equal)  var_decl.value = parse_expression(ctx, 0);
+  else  var_decl.value = null;
 
   item: Item;
   item.name = identifier.lexeme;
   kind: ItemKind;
   kind.variable = var_decl;
   return item;
+}
+
+parse_struct_decl :: (ctx: *ParsingContext) -> Item {
+
+}
+
+parse_union_decl :: (ctx: *ParsingContext) -> Item {
+
+}
+
+parse_enum_decl :: (ctx: *ParsingContext) -> Item {
+
+}
+
+parse_function_decl :: (ctx: *ParsingContext) -> Item {
+
 }
 
 parse_item :: (ctx: *ParsingContext) -> Item {

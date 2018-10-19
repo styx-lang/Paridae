@@ -35,9 +35,9 @@ fn finalize_scope(ctx: &mut ParsingContext) {
 
 fn declare_symbol(name: &String, t: &Type, ctx: &mut ParsingContext) {
     let current_scope = &mut ctx.scope_arena[ctx.current_scope_arena].symbols;
-    if current_scope.contains_key(name) {
+    /*if current_scope.contains_key(name) {
         panic!("Redeclaring symbol {}", name);
-    }
+    }*/
     current_scope.insert(name.clone(), t.clone());
 }
 
@@ -126,8 +126,8 @@ fn get_precedence(operator: BinaryOperatorKind) -> u32 {
         GreaterEq => 4,
         Equality => 4,
         NotEq => 4,
+        And => 3,
         Or => 2,
-        And => 1
     }
 }
 
@@ -170,7 +170,7 @@ fn parse_prefix_operator(ctx: &mut ParsingContext, token: Token) -> Expr {
         _ => panic!("{:?} is not a valid prefix operator!", token.token_type),
     };
 
-    let operand = parse_expression(ctx, 6);
+    let operand = parse_expression(ctx, 11);
     Expr{ node: ExprKind::Unary(operation, Box::new(operand)), t: Type::Infer }
 }
 
@@ -340,7 +340,7 @@ fn parse_expression(ctx: &mut ParsingContext, precedence: u32) -> Expr {
             inner
         }
         If => parse_if(ctx),
-        _ => panic!("{:?} is not a valid expression prefix", token.token_type),
+        _ => panic!("{:?} is not a valid expression prefix on line {}", token.token_type, token.line),
     };
 
     while precedence < get_current_precedence(ctx) {
