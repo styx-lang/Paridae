@@ -214,7 +214,13 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
     }
     let field_name = field_token.lexeme.unwrap();
 
-    let mut find_type = |search_fields: Vec<(String, Type)>, search_name: String| {
+    let mut find_type = |struct_name: String, search_name: String| {
+        let search_fields: Vec<(String, Type)> = match ctx.types.get(&struct_name) {
+            Some(Type::Union(_, xs)) => xs.clone(),
+            Some(Type::Struct(_, xs)) => xs.clone(),
+            _ => panic!("Unable to access field \"{}\" in {}", search_name, struct_name),
+        };
+
         for (f_n, f_t) in search_fields {
             if f_n == search_name {
                 return Some(f_t);
@@ -224,18 +230,18 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
     };
 
     let t = match left.t.clone() {
-        Type::Union(_, fields) => find_type(fields.clone(), field_name.clone()),
-        Type::Struct(_, fields) => find_type(fields.clone(), field_name.clone()),
+        Type::Union(name, _) => find_type(name.clone(), field_name.clone()),
+        Type::Struct(name, _) => find_type(name.clone(), field_name.clone()),
         Type::Ptr(box inner) => match inner {
-            Type::Union(_, fields) => find_type(fields.clone(), field_name.clone()),
-            Type::Struct(_, fields) => find_type(fields.clone(), field_name.clone()),
+            Type::Union(name, _) => find_type(name.clone(), field_name.clone()),
+            Type::Struct(name, _) => find_type(name.clone(), field_name.clone()),
             _ => panic!("Unable to access field \"{}\" in {:?}", field_name, left),
         }
         _ => panic!("Unable to access field \"{}\" in {:?}", field_name, left),
     };
 
     if t.is_none() {
-        panic!("No such field \"{}\" in {:?}", field_name, left);
+        panic!("No such field \"{}\" in {:?}", field_name, left.t);
     }
 
     Expr { node: ExprKind::Member(box left, field_name), t: t.unwrap() }
@@ -699,6 +705,8 @@ pub fn parse(tokens: Vec<Token>) -> Vec<Item> {
 
     declare_symbol(&String::from("sizeof"), &Type::Function(vec![Type::Void], box Type::Unsigned(IntegerSize::I64)), &mut ctx);
     declare_symbol(&String::from("printf"), &Type::Function(vec![Type::Void], box Type::Void), &mut ctx);
+    declare_symbol(&String::from("sprintf"), &Type::Function(vec![Type::Void], box Type::Void), &mut ctx);
+    declare_symbol(&String::from("fprintf"), &Type::Function(vec![Type::Void], box Type::Signed(IntegerSize::I32)), &mut ctx);
 
     let mut ast = Vec::new();
     while !is_done(&mut ctx) {

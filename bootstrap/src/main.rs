@@ -6,8 +6,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-extern crate llvm_sys as llvm;
-
 use std::fs::File;
 use std::io::Write;
 use std::io::prelude::*;

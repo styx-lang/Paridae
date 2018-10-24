@@ -340,6 +340,8 @@ fn generate_prelude(ctx: &mut CodeGenContext) {
         "typedef float f32;",
         "typedef double f64;",
         "int printf(const char* format, ...);",
+        "int fprintf(void* fp, const char* format, ...);",
+        "int sprintf(char* buffer, const char* format, ...);",
     ];
     ctx.builder.push(prelude.join("\n"));
 }

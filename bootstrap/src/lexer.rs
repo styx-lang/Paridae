@@ -190,7 +190,7 @@ fn scan_token(ctx: &mut LexingContext) {
             let t = match peek(ctx) {
                 '=' => {advance(ctx); GreaterEqual},
                 '>' => {advance(ctx); GreaterGreater},
-                _ => Less
+                _ => Greater
             };
             add_simple_token(ctx,t);
         },
