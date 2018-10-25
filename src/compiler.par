@@ -46,7 +46,8 @@ null : *void = 0;
 
 _paridae_slice :: struct {
   ptr : *u8,
-  len : s32,
+  len : u32,
+  cap : u32,
 }
 
 len :: (slice: _paridae_slice) -> s32 {
@@ -54,10 +55,16 @@ len :: (slice: _paridae_slice) -> s32 {
 }
 
 make :: (size: u64) -> []u8 {
-  p : *u8 = cast(*u8, malloc(size));
   slice : _paridae_slice;
-  slice.ptr = p;
-  slice.len = size;
+  if size == 0 {
+    slice.ptr = null;
+    slice.len = 0;
+    slice.cap = 0;
+  } else {
+    slice.ptr = cast(*u8, malloc(size));
+    slice.len = size;
+    slice.cap = size;
+  }
   return slice;
 }
 
@@ -73,6 +80,24 @@ delete :: (slice: []u8) {
   p_slice : _paridae_slice = cast([]u8, slice);
   free(p_slice.ptr);
 }
+
+append :: (slice: *[]u8, val: *void, val_size: u32 ) {
+  p_slice : *_paridae_slice = slice;
+  if p_slice.len + val_size >= p_slice.cap {
+    if p_slice.cap == 0 {
+      p_slice.ptr = malloc(val_size);
+      p_slice.cap = val_size;
+    } else {
+      new_size : u32 = p_slice.cap * 2;
+      p_slice.ptr = realloc(p_slice.ptr, new_size);
+      p_slice.cap = new_size;
+    }
+  }
+  memcpy((p_slice.ptr + p_slice.len), val, val_size);
+  p_slice.len = p_slice.len + val_size;
+}
+
+PTR_SIZE : u32 = 8;
 
 c_str :: (s: []s8) -> *s8 {
   raw : _paridae_slice = cast(_paridae_slice, s);
@@ -104,8 +129,8 @@ hashmap_create :: (size: u64) -> *HashMap {
   map : *HashMap = malloc(sizeof(HashMap));
 
   map.size = size;
-  map.keys = cast([]u64, make(size*8));
-  map.values = cast([]*void, make(size*8));
+  map.keys = cast([]u64, make(size*PTR_SIZE));
+  map.values = cast([]*void, make(size*PTR_SIZE));
 
   return map;
 }
@@ -244,15 +269,16 @@ advance :: (ctx: *LexingContext) -> u8 {
 }
 
 add_simple_token :: (ctx: *LexingContext, token_type: TokenType) {
-  token : *Token = &ctx.tokens[ctx.current_token_idx];
+  token : Token;
   token.type = token_type;
   token.lexeme = null;
   token.position = ctx.line;
+  append(&ctx.tokens, &token, sizeof(Token));
   ctx.current_token_idx = ctx.current_token_idx + 1;
 }
 
 add_lookahead_conditional_token :: (ctx: *LexingContext, expect: u8, first: TokenType, second: TokenType) {
-  token : *Token = &ctx.tokens[ctx.current_token_idx];
+  token : Token;
   token.lexeme = null;
   token.position = ctx.line;
   if peek_token(ctx,0) == expect {
@@ -261,6 +287,7 @@ add_lookahead_conditional_token :: (ctx: *LexingContext, expect: u8, first: Toke
   } else {
     token.type = second;
   }
+  append(&ctx.tokens, &token, sizeof(Token));
   ctx.current_token_idx = ctx.current_token_idx + 1;
 }
 
@@ -273,10 +300,11 @@ get_lexeme :: (ctx: *LexingContext) -> *u8 {
 }
 
 add_lexeme_token :: (ctx: *LexingContext, lexeme: *u8, token_type: TokenType) {
-  token : *Token = &ctx.tokens[ctx.current_token_idx];
+  token : Token;
   token.type = token_type;
   token.lexeme = lexeme;
   token.position = ctx.line;
+  append(&ctx.tokens, &token, sizeof(Token));
   ctx.current_token_idx = ctx.current_token_idx + 1;
 }
 
@@ -404,11 +432,8 @@ scan_token :: (ctx: *LexingContext) {
   }
 }
 
-NUM_TOKENS : u32 = sizeof(Token) * 1024 * 1024;
-
 lex :: (source: *u8, source_len: u64) -> []Token {
 
-  tokens : []Token = cast([]Token, make(NUM_TOKENS));
 
   ctx : *LexingContext = cast(*LexingContext, malloc(sizeof(LexingContext)));
   ctx.source = source;
@@ -416,21 +441,18 @@ lex :: (source: *u8, source_len: u64) -> []Token {
   ctx.start = 0;
   ctx.current = 0;
   ctx.line = 1;
-  ctx.tokens = tokens;
+  ctx.tokens = make(0);
   ctx.current_token_idx = 0;
-  
+
   while !is_done_lexing(ctx) {
     ctx.start = ctx.current;
     scan_token(ctx);
-    if ctx.current_token_idx >= NUM_TOKENS {
-      printf("Ran out of token storage!\n");
-      break;
-    }
   }
 
-  tokens = realloc_slice(tokens, ctx.current_token_idx * sizeof(Token));
-  free(ctx);
+  tokens : []Token = ctx.tokens;
 
+  free(ctx);
+  
   return tokens;
 }
 
@@ -704,10 +726,8 @@ ParsingContext :: struct {
   items: []AstItem,
 }
 
-NUM_ITEMS : u64 = 1024*1024;
-
 is_done_parsing :: (ctx: *ParsingContext) -> bool {
-  return ctx.current_token == len(ctx.tokens) / sizeof(Token);
+  return len(ctx.tokens) / sizeof(Token) == ctx.current_token;
 }
 
 accept :: (ctx: *ParsingContext, token: TokenType) -> bool {
@@ -903,15 +923,13 @@ parse_call :: (ctx: *ParsingContext, left: *AstExpr) -> *AstExpr {
   result : *AstExpr = malloc(sizeof(AstExpr));
   result.tag = AstExpr_Call;
   result.node.call.func = left;
-  result.node.call.args = cast([]*AstExpr, make(10*8)); //TODO Use dynamic growing array
+  result.node.call.args = make(0);
 
   if !accept(ctx, RightParen) {
-    i : u32 = 0;
     while true {
       expr : *AstExpr = parse_expression(ctx, 0);
-      result.node.call.args[i] = expr;
+      append(&result.node.call.args, &expr, PTR_SIZE);
       if !accept(ctx, Comma)  break;
-      i = i + 1;
     }
     expect(ctx, RightParen);
   }
@@ -1039,6 +1057,7 @@ parse_expression :: (ctx: *ParsingContext, precedence: u32) -> *AstExpr {
     expect(ctx, RightParen);
   } else {
     printf("%d is not a valid expression prefix on line %d\n", tok.type, tok.position);
+    exit(-1);
   }
 
   while precedence < get_current_precedence(ctx) {
@@ -1056,24 +1075,21 @@ parse_block :: (ctx: *ParsingContext) -> *AstBlock {
   block : *AstBlock = malloc(sizeof(AstBlock));
   block.num_stmts = 0;
 
-  stmts_len : u32 = 1;
-  block.stmts = cast([]*AstStmt, make(stmts_len * 8));
+  block.stmts = make(0);
 
   next : Token = look_ahead(ctx, 0);
   if next.type == LeftCurly {
     expect(ctx, LeftCurly);
     i : u32 = 0;
     while !accept(ctx, RightCurly) {
-      if i >= stmts_len {
-        stmts_len = 2 * stmts_len;
-        block.stmts = realloc_slice(block.stmts, stmts_len * 8);
-      }
-      block.stmts[i] = parse_stmt(ctx);
+      stmt: *AstStmt = parse_stmt(ctx);
+      append(&block.stmts, &stmt, PTR_SIZE);
       i = i + 1;
     }
     block.num_stmts = i;
   } else {
-    block.stmts[0] = parse_stmt(ctx); 
+    stmt: *AstStmt = parse_stmt(ctx);
+    append(&block.stmts, &stmt, PTR_SIZE); 
     block.num_stmts = 1;
   }
 
@@ -1170,11 +1186,8 @@ parse_struct_decl :: (ctx: *ParsingContext) -> *AstItem {
   expect(ctx, Struct);
   expect(ctx, LeftCurly);
 
-  fields_len : u32 = 1;
-  item.node.compound_type.field_names = cast([]*u8, make(fields_len * 8));
-  item.node.compound_type.field_types = cast([]*AstType, make(fields_len * 8));
-
-  i : u32 = 0;
+  item.node.compound_type.field_names = make(0);
+  item.node.compound_type.field_types = make(0);
 
   while !accept(ctx, RightCurly) {
     token : Token = consume(ctx);
@@ -1182,16 +1195,13 @@ parse_struct_decl :: (ctx: *ParsingContext) -> *AstItem {
       printf("Expected field identifier on line %d but got %d\n", token.position, token.type);
       exit(-1);
     }
-    if i >= fields_len {
-      fields_len = 2 * fields_len;
-      item.node.compound_type.field_names = realloc_slice(item.node.compound_type.field_names, fields_len * 8);
-      item.node.compound_type.field_types = realloc_slice(item.node.compound_type.field_types, fields_len * 8);
-    }
-    item.node.compound_type.field_names[i] = token.lexeme;
+    
+    append(&item.node.compound_type.field_names, &token.lexeme, PTR_SIZE);
     expect(ctx, Colon);
-    item.node.compound_type.field_types[i] = parse_type(ctx);
+
+    type : *AstType = parse_type(ctx);
+    append(&item.node.compound_type.field_types, &type, PTR_SIZE);
     expect(ctx, Comma);
-    i = i + 1;
   }
 
   return item;
@@ -1208,11 +1218,8 @@ item: * AstItem = malloc(sizeof(AstItem));
   expect(ctx, Union);
   expect(ctx, LeftCurly);
 
-  fields_len : u32 = 1;
-  item.node.compound_type.field_names = cast([]*u8, make(fields_len * 8));
-  item.node.compound_type.field_types = cast([]*AstType, make(fields_len * 8));
-
-  i : u32 = 0;
+  item.node.compound_type.field_names = make(0);
+  item.node.compound_type.field_types = make(0);
 
   while !accept(ctx, RightCurly) {
     token : Token = consume(ctx);
@@ -1220,16 +1227,12 @@ item: * AstItem = malloc(sizeof(AstItem));
       printf("Expected field identifier on line %d but got %d\n", token.position, token.type);
       exit(-1);
     }
-    if i >= fields_len {
-      fields_len = 2 * fields_len;
-      item.node.compound_type.field_names = realloc_slice(item.node.compound_type.field_names, fields_len * 8);
-      item.node.compound_type.field_types = realloc_slice(item.node.compound_type.field_types, fields_len * 8);
-    }
-    item.node.compound_type.field_names[i] = token.lexeme;
+    append(&item.node.compound_type.field_names, &token.lexeme, PTR_SIZE);
     expect(ctx, Colon);
-    item.node.compound_type.field_types[i] = parse_type(ctx);
+
+    type : *AstType = parse_type(ctx);
+    append(&item.node.compound_type.field_types, &type, PTR_SIZE);
     expect(ctx, Comma);
-    i = i + 1;
   }
 
   return item;
@@ -1247,10 +1250,7 @@ parse_enum_decl :: (ctx: *ParsingContext) -> *AstItem {
   expect(ctx, Enum);
   expect(ctx, LeftCurly);
 
-  fields_len : u32 = 1;
-  item.node.compound_type.field_names = cast([]*u8, make(fields_len * 8));
-
-  i : u32 = 0;
+  item.node.compound_type.field_names = make(0);
 
   while !accept(ctx, RightCurly) {
     token : Token = consume(ctx);
@@ -1258,13 +1258,8 @@ parse_enum_decl :: (ctx: *ParsingContext) -> *AstItem {
       printf("Expected enum variant identifier on line %d but got %d\n", token.position, token.type);
       exit(-1);
     }
-    if i >= fields_len {
-      fields_len = 2 * fields_len;
-      item.node.compound_type.field_names = realloc_slice(item.node.compound_type.field_names, fields_len * 8);
-    }
-    item.node.compound_type.field_names[i] = token.lexeme;
+    append(&item.node.compound_type.field_names, &token.lexeme, PTR_SIZE);
     expect(ctx, Comma);
-    i = i + 1;
   }
 
   return item;
@@ -1274,22 +1269,13 @@ parse_signature :: (ctx: *ParsingContext) -> Signature {
 
   sig: Signature;
 
-  param_len: u32 = 1;
-
-  sig.input_names = cast([]*u8, make(param_len * 8));
-  sig.input_types = cast([]*AstType, make(param_len * 8));
+  sig.input_names = make(0);
+  sig.input_types = make(0);
 
   expect(ctx, LeftParen);
   if !accept(ctx, RightParen) {
 
-    i : u32 = 0;
     while true {
-
-      if i >= param_len {
-        param_len = 2 * param_len;
-        sig.input_names = realloc_slice(sig.input_names, param_len * 8);
-        sig.input_types = realloc_slice(sig.input_types, param_len * 8);
-      }
 
       name: Token = consume(ctx);
       if name.type != Identifier {
@@ -1298,10 +1284,10 @@ parse_signature :: (ctx: *ParsingContext) -> Signature {
       }
       expect(ctx, Colon);
 
-      sig.input_names[i] = name.lexeme;
-      sig.input_types[i] = parse_type(ctx);
+      type: *AstType = parse_type(ctx);
+      append(&sig.input_names, &name.lexeme, PTR_SIZE);
+      append(&sig.input_types, &type, PTR_SIZE);
 
-      i = i + 1;
       if !accept(ctx, Comma) break;
     }
     expect(ctx, RightParen);
@@ -1369,20 +1355,15 @@ parse_item :: (ctx: *ParsingContext) -> *AstItem {
 }
 
 parse :: (tokens: []Token) -> []*AstItem {
-  items : []*AstItem = cast([]*AstItem, make(NUM_ITEMS*8));
+  items : []*AstItem = make(0);
   ctx : *ParsingContext = malloc(sizeof(ParsingContext));
   ctx.current_token = 0;
   ctx.tokens = tokens;
   ctx.items = items;
 
-  i : int = 0;
   while !is_done_parsing(ctx) {
-    items[i] = parse_item(ctx);
-    i = i +1;
-    if i == NUM_ITEMS {
-      printf("Ran out of storage of items!\n");
-      break;
-    }
+    item : *AstItem = parse_item(ctx);
+    append(&items, &item, PTR_SIZE);
   }
 
   free(ctx);
