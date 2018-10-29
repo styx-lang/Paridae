@@ -241,7 +241,7 @@ fn parse_member_access(ctx: &mut ParsingContext, left: Expr) -> Expr {
     };
 
     if t.is_none() {
-        panic!("No such field \"{}\" in {:?}", field_name, left.t);
+        panic!("No such field \"{}\" in {:?} on line {}", field_name, left.t, field_token.line);
     }
 
     Expr { node: ExprKind::Member(box left, field_name), t: t.unwrap() }
