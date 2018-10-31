@@ -1443,36 +1443,6 @@ get_size_of_type :: (type: *AstType) -> u32 {
 
 //LIR
 
-LirValueKind :: enum {
-  LirVal_Immediate,
-  LirVal_Address,
-  LirVal_Variable,
-}
-
-LirImmediate :: struct {
-  value: u64,
-}
-
-LirAddress :: struct {
-  offset: u64,
-}
-
-LirVariable :: struct {
-  name: *u8,
-  num: u32,
-}
-
-LirValueNode :: union {
-  immediate: LirImmediate,
-  address: LirAddress,
-  variable: LirVariable,
-}
-
-LirValue :: struct {
-  tag: LirValueKind,  
-  node: LirValueNode,
-}
-
 LirOpcode :: enum {
   //Aritmetics
   Op_add,  // r1 = r2 + r3
@@ -1521,6 +1491,10 @@ LirOpcode :: enum {
   Op_jl, // jump to address in r1 if r2 < r3
   Op_jle, // jump to address in r1 if r2 <= r3
 
+  //Constants
+  Op_const32, //introduces a 32 bit constant
+  Op_const64, //introduces a 64 bit constant
+
   //Misc
   Op_int, // invokes interrupt r1
 }
@@ -1535,17 +1509,27 @@ lir_opcode_returns_value :: (op: LirOpcode) -> bool {
   return false;
 }
 
-LirInst :: struct {
+LirValue :: struct  {}
+
+LirValue :: struct {
+  id: u64,
+  type: *Type,
   opcode: LirOpcode,
+  aux: u64,
   args: []*LirValue,
-  result: *LirValue,
+}
+
+LirBasicBlockKind :: enum {
+  Plain, //One direct successor
+  Branch, //Two successors selected based on a boolean condition
+  Exit, //No successors. Found at end of function
 }
 
 LirBasicBlock :: struct {}
 
 LirBasicBlock :: struct {
-  label: *u8,
-  insts: []*LirInst,
+  id: u64,
+  values: []*LirValue,
   successors: []*LirBasicBlock,
   predecessors: []*LirBasicBlock,
 }
@@ -1562,51 +1546,19 @@ LirContext :: struct {
   unique: u32,
 }
 
-//TODO Combine arities into a single function using varargs
-emit_lir_inst1 :: (ctx: *LirContext, opcode: LirOpcode, val: *LirValue) -> *LirValue {
-  inst : *LirInst = malloc(sizeof(LirInst));
-  inst.opcode = opcode;
-  inst.args = make(PTR_SIZE);
-  inst.args[0] = val;
-  append(&ctx.current_block.insts, &inst, PTR_SIZE);
+create_lir_value :: (ctx: *LirContext, opcode: LirOpcode, type: *Type) -> *LirValue {
+  val : *LirValue = malloc(sizeof(LirValue));
+  val.opcode = opcode;
+  val.args = make(0);
+  val.type = type;
+  append(&ctx.current_block.values, &val, PTR_SIZE);
 
-  if lir_opcode_returns_value(opcode) {
-    inst.result = malloc(sizeof(LirValue));
-    inst.result.tag = LirVal_Variable;
-    inst.result.node.variable.name = null;
-    inst.result.node.variable.num = ctx.unique;
-    ctx.unique = ctx.unique + 1;
-  } else {
-    inst.result = null;
-  }
-
-  return inst.result;
-}
-
-emit_lir_inst2 :: (ctx: *LirContext, opcode: LirOpcode, val1: *LirValue, val2: *LirValue) -> *LirValue {
-  inst : *LirInst = malloc(sizeof(LirInst));
-  inst.opcode = opcode;
-  inst.args = make(2 * PTR_SIZE);
-  inst.args[0] = val1;
-  inst.args[1] = val2;
-  append(&ctx.current_block.insts, &inst, PTR_SIZE);
-
-  if lir_opcode_returns_value(opcode) {
-    inst.result = malloc(sizeof(LirValue));
-    inst.result.tag = LirVal_Variable;
-    inst.result.node.variable.name = null;
-    inst.result.node.variable.num = ctx.unique;
-    ctx.unique = ctx.unique + 1;
-  } else {
-    inst.result = null;
-  }
-
-  return inst.result;
+  return val;
 }
 
 start_basic_block :: (ctx: *LirContext) -> *LirBasicBlock {
   block : *LirBasicBlock = malloc(sizeof(LirBasicBlock));
-  block.insts = make(0);
+  block.values = make(0);
   ctx.current_block = block;
   return block;
 }
@@ -1624,21 +1576,27 @@ lower_binary_expr :: (ctx: *LirContext, binary: *BinaryAstExpr) -> *LirValue {
   if binary.operator == Bin_Division  op = Op_idiv;
   if binary.operator == Bin_Modulus  op = Op_mod;
 
-  return emit_lir_inst2(ctx, op, lower_expr(ctx, binary.left), lower_expr(ctx, binary.right));
-}
+  left: *LirValue = lower_expr(ctx, binary.left);
+  right: *LirValue = lower_expr(ctx, binary.right);
 
-lower_literal :: (ctx: *LirContext, literal: *Literal) -> *LirValue {
-  val: *LirValue = malloc(sizeof(LirValue));
-  val.tag = LirVal_Immediate;
-  val.node.immediate.value = literal.val.integer;
+  val: *LirValue = create_lir_value(ctx, op, left.type);
+
+  append(&val.args, &left, PTR_SIZE);
+  append(&val.args, &right, PTR_SIZE);
 
   return val;
 }
 
-lower_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
-  val: *LirValue = malloc(sizeof(LirValue));
-  val.tag = LirVal_Address;
-  val.node.address.offset = 0;
+lower_literal :: (ctx: *LirContext, literal: *Literal) -> *LirValue {
+  val: *LirValue = create_lir_value(ctx, Op_const32, null);
+  val.aux = literal.val.integer;
+
+  return val;
+}
+
+lower_read_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
+  val: *LirValue = create_lir_value(ctx, Op_load, null);
+  val.aux = 0;
 
   return val;
 }
@@ -1646,7 +1604,7 @@ lower_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
 lower_expr :: (ctx: *LirContext, expr: *AstExpr) -> *LirValue {
   if expr.tag == AstExpr_Binary  return lower_binary_expr(ctx, &expr.node.binary);
   if expr.tag == AstExpr_Literal  return lower_literal(ctx, &expr.node.literal);
-  if expr.tag == AstExpr_Identifier  return lower_identifier(ctx, expr.node.identifier);
+  if expr.tag == AstExpr_Identifier  return lower_read_identifier(ctx, expr.node.identifier);
  
   printf("Expr kind %d not yet supported\n", expr.tag); 
   exit(-1);
@@ -1657,13 +1615,15 @@ lower_return :: (ctx: *LirContext, ret: *AstExpr) {
 }
 
 lower_var_decl :: (ctx: *LirContext, decl: *VariableDecl) {
-  size : *LirValue = malloc(sizeof(LirValue));
-  size.tag = LirVal_Immediate;
-  size.node.immediate.value = get_size_of_type(decl.type);
+  size: *LirValue = create_lir_value(ctx, Op_const64, null);
+  size.aux = get_size_of_type(decl.type);
 
-  storage : *LirValue = emit_lir_inst1(ctx, Op_alloca, size);
+  storage: *LirValue = create_lir_value(ctx, Op_alloca, null);
+  append(&storage.args, &size, PTR_SIZE);
   if decl.value {
-    emit_lir_inst2(ctx, Op_store, storage, lower_expr(ctx, decl.value));
+    store: *LirValue = create_lir_value(ctx, Op_store, null);
+    rhs: *LirValue = lower_expr(ctx, decl.value);
+    append(&store.args, &rhs, PTR_SIZE);
   }
 }
 
@@ -1685,7 +1645,7 @@ lower_func :: (ctx: *LirContext, func: *FunctionDecl, name: *u8) -> *LirFunction
   result.blocks = make(0);
 
   entry : *LirBasicBlock = start_basic_block(ctx);
-  entry.label = "entry";
+  entry.id = 0;
 
   append(&result.blocks, &entry, PTR_SIZE);
 
@@ -1741,44 +1701,32 @@ name_of_lir_opcode :: (op: LirOpcode) -> *u8 {
   if op == Op_jl  return "jl";
   if op == Op_jle  return "jle";
 
+  if op == Op_const32  return "const32";
+  if op == Op_const64  return "const64";
+
   if op == Op_int  return "int";
 
   printf("Failed to find name for %d\n", op);
   exit(-1);
 }
 
-
-output_lir_value :: (val: *LirValue) -> bool {
-  if val {
-    if val.tag == LirVal_Immediate  printf("%lu", val.node.immediate.value);
-    if val.tag == LirVal_Address  printf("&%lu", val.node.address.offset);
-    if val.tag == LirVal_Variable {
-      if val.node.variable.name  printf("%%%s%u", val.node.variable.name, val.node.variable.num);
-      else  printf("%%%u", val.node.variable.num);
-    }
-    return true;
-  }
-  return false;
-}
-
-output_lir_inst :: (inst: *LirInst) {
-  printf("\t");
-  if output_lir_value(inst.result)  printf(" = ");
-  printf("%s", name_of_lir_opcode(inst.opcode));
+output_lir_value :: (val: *LirValue) {
+  printf("\t%%%lu = %s", val.id, name_of_lir_opcode(val.opcode));
   i : u32 = 0;
-  while i < (len(inst.args) / PTR_SIZE) {
-    printf(" ");
-    output_lir_value(inst.args[i]);
+  while i < (len(val.args) / PTR_SIZE) {
+    arg: *LirValue = val.args[i];
+    printf(" %%%lu", arg.id);
     i = i + 1;
   }
+  if val.opcode >= Op_const32 && val.opcode <= Op_const64  printf(" %lu\n", val.aux);
   printf("\n");
 }
 
 output_lir_block :: (block: *LirBasicBlock) {
-  printf("%s:\n", block.label);
+  printf("b%lu:\n", block.id);
   i : u32 = 0;
-  while i < (len(block.insts) / PTR_SIZE) {
-    output_lir_inst(block.insts[i]);
+  while i < (len(block.values) / PTR_SIZE) {
+    output_lir_value(block.values[i]);
     i = i + 1;
   }
 }
@@ -1857,44 +1805,13 @@ emit_code_line :: (ctx: *CodegenContext, line: *u8) {
   ctx.code_segment[idx] = line;
 }
 
-emit_value :: (ctx: *CodegenContext, val: *LirValue) -> *u8 {
-  buffer: *u8 = malloc(10);
-  if val.tag == LirVal_Immediate  sprintf(buffer, "%lu", val.node.immediate.value);
-  if val.tag == LirVal_Address  sprintf(buffer, "%lu", val.node.address.offset);
-  if val.tag == LirVal_Variable  sprintf(buffer, "%d", val.node.variable.num);
-  return buffer;
-}
-
-emit_binary_arithmetic_inst :: (ctx: *CodegenContext, op_name: *u8, arg1: *LirValue, arg2: *LirValue) {
-  buffer: *u8 = malloc(40);
-  a1: *u8 = emit_value(ctx, arg1);
-  a2: *u8 = emit_value(ctx, arg2);
-  sprintf(buffer, "\t%s %s, %s\n", op_name, a1, a2);
-  emit_code_line(ctx, buffer);
-}
-
-emit_inst :: (ctx: *CodegenContext, inst: *LirInst) {
-  if inst.opcode == Op_add  return emit_binary_arithmetic_inst(ctx, "add", inst.args[0], inst.args[1]);
-  if inst.opcode == Op_sub  return emit_binary_arithmetic_inst(ctx, "sub", inst.args[0], inst.args[1]);
-  if inst.opcode == Op_imul  return emit_binary_arithmetic_inst(ctx, "imul", inst.args[0], inst.args[1]);
-  if inst.opcode == Op_idiv  return emit_binary_arithmetic_inst(ctx, "idiv", inst.args[0], inst.args[1]);
-}
-
-emit_basic_block :: (ctx: *CodegenContext, block: *LirBasicBlock) {
-  i : u32 = 0;
-  while i < len(block.insts) / PTR_SIZE {
-    emit_inst(ctx, block.insts[i]);
-    i = i + 1;
-  }
-}
-
 emit_function :: (ctx: *CodegenContext, func: *LirFunction) {
   buffer: *u8 = malloc(40);
   sprintf(buffer, "\n%s:\n", func.name);
   emit_code_line(ctx, buffer);
   i : u32 = 0;
   while i < len(func.blocks) / PTR_SIZE {
-    emit_basic_block(ctx, func.blocks[i]);
+    //emit_basic_block(ctx, func.blocks[i]);
     i = i + 1;
   }
 }
