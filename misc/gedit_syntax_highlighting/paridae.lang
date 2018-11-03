@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language id="paridae" name="Paridae" version="2.0" _section="Source">
+  <metadata>
+    <property name="globs">*.par</property>
+  </metadata>
+  <styles>
+    <style id="comment" name="Comment" map-to="def:comment"/>
+    <style id="string" name="String" map-to="def:string"/>
+    <style id="escaped-character" name="Escaped Character" map-to="def:special-char"/>
+    <style id="keyword" name="Keyword" map-to="def:keyword"/>
+    <style id="type" name="Data Type" map-to="def:type"/>
+  </styles>
+  <definitions>
+    <context id="paridae">
+      <include>
+
+        <context id="comment" style-ref="comment">
+          <start>\/\/</start>
+          <end>$</end>
+        </context>
+
+        <context id="string" end-at-line-end="true" style-ref="string">
+          <start>"</start>
+          <end>"</end>
+          <include>
+            <context id="escape" style-ref="escaped-character">
+              <match>\\.</match>
+            </context>
+          </include>
+        </context>
+
+        <context id="comment-multiline" style-ref="comment">
+          <start>\/\*</start>
+          <end>\*\/</end>
+          <include>
+            <context ref="def:in-comment"/>
+          </include>
+        </context>
+
+        <context ref="def:decimal"/>
+        <context ref="def:float"/>
+
+        <context id="keywords" style-ref="keyword">
+          <keyword>cast</keyword>
+          <keyword>if</keyword>
+          <keyword>else</keyword>
+          <keyword>for</keyword>
+          <keyword>while</keyword>
+          <keyword>return</keyword>
+          <keyword>break</keyword>
+          <keyword>match</keyword>
+          <keyword>defer</keyword>
+          <keyword>continue</keyword>
+          <keyword>sizeof</keyword>
+          <keyword>null</keyword>
+        </context>
+
+        <context id="types" style-ref="type">
+          <keyword>u8</keyword>
+          <keyword>u16</keyword>
+          <keyword>u32</keyword>
+          <keyword>u64</keyword>
+          <keyword>s8</keyword>
+          <keyword>s16</keyword>
+          <keyword>s32</keyword>
+          <keyword>s64</keyword>
+          <keyword>f32</keyword>
+          <keyword>f64</keyword>
+          <keyword>enum</keyword>
+          <keyword>struct</keyword>
+          <keyword>union</keyword>
+          <keyword>void</keyword>
+        </context>
+
+      </include>
+    </context>
+  </definitions>
+</language>
