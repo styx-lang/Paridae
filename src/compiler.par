@@ -129,8 +129,16 @@ hashmap_create :: (size: u64) -> *HashMap {
   map : *HashMap = malloc(sizeof(HashMap));
 
   map.size = size;
-  map.keys = cast([]u64, make(size*PTR_SIZE));
-  map.values = cast([]*void, make(size*PTR_SIZE));
+  map.load = 0;
+  map.keys = make(size*PTR_SIZE);
+  map.values = make(size*PTR_SIZE);
+
+  i: u32 = 0;
+  while i < size {
+    map.keys[i] = null;
+    map.values[i] = null;
+    i = i + 1;
+  }
 
   return map;
 }
@@ -147,11 +155,14 @@ hashmap_insert :: (map: *HashMap, key: *void, value: *void) {
     exit(-1);
   }
   while (true) {
-    if (map.keys[h] == key)  break;
-    if (map.keys[h] == null) {
+    if (map.keys[h] == key)  {
+      map.values[h] = value;
+      break;
+    } else if (map.keys[h] == null) {
       map.keys[h] = key;
       map.values[h] = value;
       map.load = map.load + 1;
+      break;
     } else {
       h = (h + 1) % map.size;
     }
@@ -1543,11 +1554,15 @@ LirFunction :: struct {
 LirContext :: struct {
   functions: []*LirFunction, 
   current_block: *LirBasicBlock,
-  unique: u32,
+  next_block_id: u64,
+  next_value_id: u64,
+  use_defs: *HashMap,
 }
 
 create_lir_value :: (ctx: *LirContext, opcode: LirOpcode, type: *Type) -> *LirValue {
   val : *LirValue = malloc(sizeof(LirValue));
+  val.id = ctx.next_value_id;
+  ctx.next_value_id = ctx.next_value_id + 1;
   val.opcode = opcode;
   val.args = make(0);
   val.type = type;
@@ -1556,10 +1571,20 @@ create_lir_value :: (ctx: *LirContext, opcode: LirOpcode, type: *Type) -> *LirVa
   return val;
 }
 
+LirVariableDef :: struct {
+  name: *u8,
+  val: *LirValue,
+}
+
 start_basic_block :: (ctx: *LirContext) -> *LirBasicBlock {
   block : *LirBasicBlock = malloc(sizeof(LirBasicBlock));
+  block.id = ctx.next_block_id;
+  ctx.next_block_id = ctx.next_block_id + 1;
   block.values = make(0);
   ctx.current_block = block;
+  vars: *[]LirVariableDef = malloc(sizeof(_paridae_slice));
+  *vars = make(0);
+  hashmap_insert(ctx.use_defs, block, vars);
   return block;
 }
 
@@ -1594,11 +1619,49 @@ lower_literal :: (ctx: *LirContext, literal: *Literal) -> *LirValue {
   return val;
 }
 
-lower_read_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
-  val: *LirValue = create_lir_value(ctx, Op_load, null);
-  val.aux = 0;
+lower_read_recursive_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
+  printf("Recursive read %s\n", identifier);
+  exit(-1);
+}
 
-  return val;
+lower_read_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
+  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, ctx.current_block);
+ 
+  i: u32 = 0; 
+  while i < len(*vars) / PTR_SIZE {
+    deref: []LirVariableDef = *vars;
+    v: LirVariableDef = deref[i];
+    if strcmp(v.name, identifier) == 0  return  v.val;
+    i = i + 1;
+  }
+  return lower_read_recursive_identifier(ctx, identifier);
+}
+
+lower_write_identifier :: (ctx: *LirContext, identifier: *u8, rhs: *AstExpr) {
+  printf("%s\n", identifier);
+  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, ctx.current_block);
+
+  val: *LirValue = lower_expr(ctx, rhs);
+
+  found: bool = false;
+
+  i: u32 = 0; 
+  while i < len(*vars) / sizeof(LirVariableDef) {
+    deref: []LirVariableDef = (*vars);
+    v: LirVariableDef = deref[i];
+    if strcmp(v.name, identifier) == 0  {
+      v.val = val;
+      found = true;
+      break;
+    }
+    i = i + 1;
+  }
+  if !found {
+    var: LirVariableDef;
+    var.name = identifier;
+    var.val = val;
+    append(vars, &var, sizeof(LirVariableDef));
+  }
 }
 
 lower_expr :: (ctx: *LirContext, expr: *AstExpr) -> *LirValue {
@@ -1614,27 +1677,21 @@ lower_return :: (ctx: *LirContext, ret: *AstExpr) {
   
 }
 
-lower_var_decl :: (ctx: *LirContext, decl: *VariableDecl) {
-  size: *LirValue = create_lir_value(ctx, Op_const64, null);
-  size.aux = get_size_of_type(decl.type);
-
-  storage: *LirValue = create_lir_value(ctx, Op_alloca, null);
-  append(&storage.args, &size, PTR_SIZE);
-  if decl.value {
-    store: *LirValue = create_lir_value(ctx, Op_store, null);
-    rhs: *LirValue = lower_expr(ctx, decl.value);
-    append(&store.args, &rhs, PTR_SIZE);
-  }
+lower_assignment :: (ctx: *LirContext, assignment: *AssignmentAstStmt) {
+  //TODO Handle compound rhs expressions
+  lower_write_identifier(ctx, assignment.lhs.node.identifier, assignment.rhs);
 }
 
-lower_assignment :: (ctx: *LirContext, assignment: *AssignmentAstStmt) {
-  
+lower_var_decl :: (ctx: *LirContext, name: *u8, decl: *VariableDecl) {
+  if decl.value {
+    lower_write_identifier(ctx, name, decl.value);
+  }
 }
 
 lower_stmt :: (ctx: *LirContext, stmt: *AstStmt) {
  
   if stmt.tag == AstStmt_Assignment  lower_assignment(ctx, &stmt.node.assignment);
-  if stmt.tag == AstStmt_Item  lower_var_decl(ctx, &stmt.node.item.node.variable);
+  if stmt.tag == AstStmt_Item  lower_var_decl(ctx, stmt.node.item.name, &stmt.node.item.node.variable);
   if stmt.tag == AstStmt_Return  lower_return(ctx, stmt.node._return);
 }
 
@@ -1718,7 +1775,7 @@ output_lir_value :: (val: *LirValue) {
     printf(" %%%lu", arg.id);
     i = i + 1;
   }
-  if val.opcode >= Op_const32 && val.opcode <= Op_const64  printf(" %lu\n", val.aux);
+  if val.opcode >= Op_const32 && val.opcode <= Op_const64  printf(" %lu", val.aux);
   printf("\n");
 }
 
@@ -1756,6 +1813,7 @@ lower_ast_to_lir :: (ast: []*AstItem) -> []*LirFunction {
   ctx: *LirContext = malloc(sizeof(LirContext));
   ctx.functions = make(0);
   ctx.current_block = null;
+  ctx.use_defs = hashmap_create(256);
 
   i : u32 = 0;
 
