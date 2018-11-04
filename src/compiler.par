@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Lasse Dissing
+/// Copyright (c) 2018 Lasse Dissing
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -1466,6 +1466,14 @@ LirOpcode :: enum {
   Op_shl, // r1 = r2 >> r3
   Op_shr, // r1 = r2 << r3 (Logical)
   Op_sar, // r1 = r2 << r3 (Arithmetic)
+  
+  //Comparison
+  Op_le, // r1 < r2
+  Op_leq, // r1 <= r2
+  Op_ge, // r1 > r2
+  Op_geq, // r1 >= r2
+  Op_eq, // r1 > r2
+  Op_neq, // r1 >= r2
 
   //Logic
   Op_neg, // r1 = !r2 (0 -> 1 and everything else -> 0)
@@ -1508,6 +1516,7 @@ LirOpcode :: enum {
 
   //Misc
   Op_int, // invokes interrupt r1
+  Op_phi,
 }
 
 lir_opcode_returns_value :: (op: LirOpcode) -> bool {
@@ -1554,6 +1563,7 @@ LirFunction :: struct {
 LirContext :: struct {
   functions: []*LirFunction, 
   current_block: *LirBasicBlock,
+  current_func: *LirFunction,
   next_block_id: u64,
   next_value_id: u64,
   use_defs: *HashMap,
@@ -1579,32 +1589,125 @@ LirVariableDef :: struct {
 start_basic_block :: (ctx: *LirContext) -> *LirBasicBlock {
   block : *LirBasicBlock = malloc(sizeof(LirBasicBlock));
   block.id = ctx.next_block_id;
-  ctx.next_block_id = ctx.next_block_id + 1;
   block.values = make(0);
+  block.successors = make(0);
+  block.predecessors = make(0);
+  
+  ctx.next_block_id = ctx.next_block_id + 1;
+  
   ctx.current_block = block;
+  append(&ctx.current_func.blocks, &block, PTR_SIZE);
   vars: *[]LirVariableDef = malloc(sizeof(_paridae_slice));
   *vars = make(0);
   hashmap_insert(ctx.use_defs, block, vars);
+  
   return block;
 }
 
+
 lower_expr :: (ctx: *LirContext, expr: *AstExpr) -> *LirValue
+lower_stmt :: (ctx: *LirContext, stmt: *AstStmt)
+lower_read_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue
+lower_write_identifier :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock)
+
+add_phi_operands :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock) -> *LirValue {
+  i: u32 = 0;
+  while i < len(block.predecessors) / PTR_SIZE {
+    arg: *LirValue = lower_read_identifier(ctx, identifier, block.predecessors[i]);
+    append(&val.args, &arg, PTR_SIZE);
+    i = i + 1;
+  }
+  return val;
+}
+
+lower_read_recursive_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue {
+
+  val: *LirValue;
+  if len(block.predecessors) == PTR_SIZE {
+    val = lower_read_identifier(ctx, identifier, block.predecessors[0]);
+  } else {
+    val = create_lir_value(ctx, Op_phi, null);
+    lower_write_identifier(ctx, identifier, val, block);
+    val = add_phi_operands(ctx, identifier, val, block);
+  }
+  lower_write_identifier(ctx, identifier, val, block);
+  return val;
+}
+
+//TODO These functions really suffer from lacking features
+//TODO They should be rewritten when we get field access on compound expressions and propper hashmaps
+
+lower_read_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue {
+  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, block);
+ 
+  i: u32 = 0; 
+  while i < len(*vars) / sizeof(LirVariableDef) {
+    deref: []LirVariableDef = *vars;
+    v: LirVariableDef = deref[i];
+    if strcmp(v.name, identifier) == 0  return  v.val;
+    i = i + 1;
+  }
+  return lower_read_recursive_identifier(ctx, identifier, block);
+}
+
+lower_write_identifier :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock) {
+  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, block);
+
+  found: bool = false;
+
+  i: u32 = 0; 
+  while i < len(*vars) / sizeof(LirVariableDef) {
+    deref: []LirVariableDef = (*vars);
+    v: LirVariableDef = deref[i];
+    if strcmp(v.name, identifier) == 0  {
+      v.val = val;
+      deref[i] = v;
+      found = true;
+      break;
+    }
+    i = i + 1;
+  }
+  if !found {
+    var: LirVariableDef;
+    var.name = identifier;
+    var.val = val;
+    append(vars, &var, sizeof(LirVariableDef));
+  }
+}
 
 lower_binary_expr :: (ctx: *LirContext, binary: *BinaryAstExpr) -> *LirValue {
 
   op: LirOpcode; 
 
-  //TODO Add remaining operators here
   if binary.operator == Bin_Addition  op = Op_add;
-  if binary.operator == Bin_Subtraction  op = Op_sub;
-  if binary.operator == Bin_Product  op = Op_imul;
-  if binary.operator == Bin_Division  op = Op_idiv;
-  if binary.operator == Bin_Modulus  op = Op_mod;
-
+  else if binary.operator == Bin_Subtraction  op = Op_sub;
+  else if binary.operator == Bin_Product  op = Op_imul;
+  else if binary.operator == Bin_Division  op = Op_idiv;
+  else if binary.operator == Bin_Modulus  op = Op_mod;
+  
+  else if binary.operator == Bin_Less  op = Op_le;
+  else if binary.operator == Bin_LessEq  op = Op_leq;
+  else if binary.operator == Bin_Greater  op = Op_ge;
+  else if binary.operator == Bin_GreaterEq  op = Op_geq;
+  else if binary.operator == Bin_Equality  op = Op_eq;
+  else if binary.operator == Bin_NotEq  op = Op_neq;
+  
+  else if binary.operator == Bin_BAnd  op = Op_and;
+  else if binary.operator == Bin_BOr  op = Op_or;
+  else if binary.operator == Bin_BXor  op = Op_xor;
+  else if binary.operator == Bin_LeftShift  op = Op_shl;
+  else if binary.operator == Bin_RightShift  op = Op_sar; //TODO When to shr vs. sar
+  
+  else if binary.operator == Bin_And  op = Op_and;
+  else if binary.operator == Bin_Or  op = Op_or;
+  else {
+    printf("Unknown bin op %d\n", binary.operator);
+  }
+ 
   left: *LirValue = lower_expr(ctx, binary.left);
   right: *LirValue = lower_expr(ctx, binary.right);
 
-  val: *LirValue = create_lir_value(ctx, op, left.type);
+  val: *LirValue = create_lir_value(ctx, op, null);
 
   append(&val.args, &left, PTR_SIZE);
   append(&val.args, &right, PTR_SIZE);
@@ -1619,80 +1722,105 @@ lower_literal :: (ctx: *LirContext, literal: *Literal) -> *LirValue {
   return val;
 }
 
-lower_read_recursive_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
-  printf("Recursive read %s\n", identifier);
-  exit(-1);
-}
+lower_call :: (ctx: *LirContext, call: CallAstExpr) -> *LirValue {
 
-lower_read_identifier :: (ctx: *LirContext, identifier: *u8) -> *LirValue {
-  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, ctx.current_block);
- 
-  i: u32 = 0; 
-  while i < len(*vars) / PTR_SIZE {
-    deref: []LirVariableDef = *vars;
-    v: LirVariableDef = deref[i];
-    if strcmp(v.name, identifier) == 0  return  v.val;
+  args: []*LirValue = make(0);
+
+  i: s32 = 0;
+  while i < len(call.args) / PTR_SIZE {
+    arg: *LirValue = lower_expr(ctx, call.args[i]);
+    append(&args, &arg, PTR_SIZE);
     i = i + 1;
   }
-  return lower_read_recursive_identifier(ctx, identifier);
-}
-
-lower_write_identifier :: (ctx: *LirContext, identifier: *u8, rhs: *AstExpr) {
-  printf("%s\n", identifier);
-  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, ctx.current_block);
-
-  val: *LirValue = lower_expr(ctx, rhs);
-
-  found: bool = false;
-
-  i: u32 = 0; 
-  while i < len(*vars) / sizeof(LirVariableDef) {
-    deref: []LirVariableDef = (*vars);
-    v: LirVariableDef = deref[i];
-    if strcmp(v.name, identifier) == 0  {
-      v.val = val;
-      found = true;
-      break;
-    }
+  val: *LirValue = create_lir_value(ctx, Op_call, null);
+  val.aux = cast(u64, call.func.node.identifier);
+  
+  //TODO: This second loop is to ensure all the arguments are lowered before the call inst. 
+  //This can be removed when instruction scheduling at some points gets implemented
+  
+  i = 0;
+  while i < len(args) / PTR_SIZE {
+    append(&val.args, &(args[i]), PTR_SIZE);
     i = i + 1;
   }
-  if !found {
-    var: LirVariableDef;
-    var.name = identifier;
-    var.val = val;
-    append(vars, &var, sizeof(LirVariableDef));
-  }
+  
+  return val;
+}
+
+lower_conditional :: (ctx: *LirContext, condition: ConditionalAstExpr) -> *LirValue {
+  //val: *LirValue = create_lir_value(ctx, Op_call, null);
+  //val.aux = cast(u64, call.func.node.identifier);
+  
+  return null;
 }
 
 lower_expr :: (ctx: *LirContext, expr: *AstExpr) -> *LirValue {
   if expr.tag == AstExpr_Binary  return lower_binary_expr(ctx, &expr.node.binary);
   if expr.tag == AstExpr_Literal  return lower_literal(ctx, &expr.node.literal);
-  if expr.tag == AstExpr_Identifier  return lower_read_identifier(ctx, expr.node.identifier);
+  if expr.tag == AstExpr_Identifier  return lower_read_identifier(ctx, expr.node.identifier, ctx.current_block);
+  if expr.tag == AstExpr_Call  return lower_call(ctx, expr.node.call);
+  if expr.tag == AstExpr_Conditional  return lower_conditional(ctx, expr.node.conditional);
  
   printf("Expr kind %d not yet supported\n", expr.tag); 
   exit(-1);
 }
 
-lower_return :: (ctx: *LirContext, ret: *AstExpr) {
+lower_return :: (ctx: *LirContext, ret_expr: *AstExpr) {
   
+  val: *LirValue = lower_expr(ctx, ret_expr);
+  ret: *LirValue = create_lir_value(ctx, Op_ret, val.type);
+  append(&ret.args, &val, PTR_SIZE);
 }
 
 lower_assignment :: (ctx: *LirContext, assignment: *AssignmentAstStmt) {
   //TODO Handle compound rhs expressions
-  lower_write_identifier(ctx, assignment.lhs.node.identifier, assignment.rhs);
+  val: *LirValue = lower_expr(ctx, assignment.rhs);
+  lower_write_identifier(ctx, assignment.lhs.node.identifier, val, ctx.current_block);
 }
 
 lower_var_decl :: (ctx: *LirContext, name: *u8, decl: *VariableDecl) {
   if decl.value {
-    lower_write_identifier(ctx, name, decl.value);
+    val: *LirValue = lower_expr(ctx, decl.value);
+    lower_write_identifier(ctx, name, val, ctx.current_block);
   }
+}
+
+lower_block :: (ctx: *LirContext, block: *AstBlock) {
+  
+  i : u32 = 0;
+  while i < block.num_stmts {
+    lower_stmt(ctx, block.stmts[i]);
+    i = i + 1;
+  }
+}
+
+lower_while_stmt :: (ctx: *LirContext, _while: WhileAstStmt) {  
+  entry_bb: *LirBasicBlock = ctx.current_block;
+  body_bb: *LirBasicBlock = start_basic_block(ctx);
+  append(&body_bb.predecessors, &entry_bb, PTR_SIZE);
+  
+  cond: *LirValue = lower_expr(ctx, _while.condition);
+  
+  lower_block(ctx, _while.body);
+  
+  last_block: *LirBasicBlock = ctx.current_block;
+  
+  exit_bb: *LirBasicBlock = start_basic_block(ctx);
+  append(&exit_bb.predecessors, &entry_bb, PTR_SIZE);
+  append(&exit_bb.predecessors, &last_block, PTR_SIZE);
 }
 
 lower_stmt :: (ctx: *LirContext, stmt: *AstStmt) {
  
   if stmt.tag == AstStmt_Assignment  lower_assignment(ctx, &stmt.node.assignment);
-  if stmt.tag == AstStmt_Item  lower_var_decl(ctx, stmt.node.item.name, &stmt.node.item.node.variable);
-  if stmt.tag == AstStmt_Return  lower_return(ctx, stmt.node._return);
+  else if stmt.tag == AstStmt_Item  lower_var_decl(ctx, stmt.node.item.name, &stmt.node.item.node.variable);
+  else if stmt.tag == AstStmt_Return  lower_return(ctx, stmt.node._return);
+  else if stmt.tag == AstStmt_AstExpr  lower_expr(ctx, stmt.node.expr);  
+  else if stmt.tag == AstStmt_While  lower_while_stmt(ctx, stmt.node._while);
+  else {
+    printf("Stmt kind %d not yet supported\n", stmt.tag);
+  }
+ 
 }
 
 lower_func :: (ctx: *LirContext, func: *FunctionDecl, name: *u8) -> *LirFunction {
@@ -1700,17 +1828,11 @@ lower_func :: (ctx: *LirContext, func: *FunctionDecl, name: *u8) -> *LirFunction
   result : *LirFunction = malloc(sizeof(LirFunction));
   result.name = name;
   result.blocks = make(0);
-
-  entry : *LirBasicBlock = start_basic_block(ctx);
-  entry.id = 0;
-
-  append(&result.blocks, &entry, PTR_SIZE);
-
-  i : u32 = 0;
-  while i < func.block.num_stmts {
-    lower_stmt(ctx, func.block.stmts[i]);
-    i = i + 1;
-  }
+  
+  ctx.current_func = result;
+  
+  start_basic_block(ctx);
+  lower_block(ctx, func.block);
 
   return result;
   
@@ -1735,6 +1857,13 @@ name_of_lir_opcode :: (op: LirOpcode) -> *u8 {
   if op == Op_and  return "and";
   if op == Op_or  return "or";
   if op == Op_xor  return "xor";
+  
+  if op == Op_le return "le";
+  if op == Op_leq return "leq";
+  if op == Op_ge return "ge";
+  if op == Op_geq return "geq";
+  if op == Op_eq return "eq";
+  if op == Op_neq return "neq";
 
   if op == Op_alloca  return "alloca";
   if op == Op_load  return "load";
@@ -1762,6 +1891,7 @@ name_of_lir_opcode :: (op: LirOpcode) -> *u8 {
   if op == Op_const64  return "const64";
 
   if op == Op_int  return "int";
+  if op == Op_phi  return "phi";
 
   printf("Failed to find name for %d\n", op);
   exit(-1);
@@ -1814,6 +1944,9 @@ lower_ast_to_lir :: (ast: []*AstItem) -> []*LirFunction {
   ctx.functions = make(0);
   ctx.current_block = null;
   ctx.use_defs = hashmap_create(256);
+  
+  ctx.next_block_id = 0;
+  ctx.next_value_id = 0;
 
   i : u32 = 0;
 
@@ -1928,7 +2061,7 @@ codegen :: (filename: *u8, lir: []*LirFunction) {
 
 _paridae_entry :: () -> s32 {
 
-  fp: *void = fopen("examples/integer_arithmetic.par", "r");
+  fp: *void = fopen("examples/ssa_test.par", "r");
   //fp: *void = fopen("src/compiler.par", "r");
 
   if !fp {
