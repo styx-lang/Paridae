@@ -1517,6 +1517,9 @@ LirOpcode :: enum {
   //Misc
   Op_int, // invokes interrupt r1
   Op_phi,
+  
+  //Pseudo operations
+  Op_undef,
 }
 
 lir_opcode_returns_value :: (op: LirOpcode) -> bool {
@@ -1539,6 +1542,11 @@ LirValue :: struct {
   args: []*LirValue,
 }
 
+LirVariableDef :: struct {
+  name: *u8,
+  val: *LirValue,
+}
+
 LirBasicBlockKind :: enum {
   Plain, //One direct successor
   Branch, //Two successors selected based on a boolean condition
@@ -1552,6 +1560,8 @@ LirBasicBlock :: struct {
   values: []*LirValue,
   successors: []*LirBasicBlock,
   predecessors: []*LirBasicBlock,
+  incomplete_phis: []*LirVariableDef,
+  sealed: bool,
 }
 
 LirFunction :: struct {
@@ -1581,17 +1591,14 @@ create_lir_value :: (ctx: *LirContext, opcode: LirOpcode, type: *Type) -> *LirVa
   return val;
 }
 
-LirVariableDef :: struct {
-  name: *u8,
-  val: *LirValue,
-}
-
 start_basic_block :: (ctx: *LirContext) -> *LirBasicBlock {
   block : *LirBasicBlock = malloc(sizeof(LirBasicBlock));
   block.id = ctx.next_block_id;
   block.values = make(0);
   block.successors = make(0);
   block.predecessors = make(0);
+  block.incomplete_phis = make(0);
+  block.sealed = false;
   
   ctx.next_block_id = ctx.next_block_id + 1;
   
@@ -1610,6 +1617,21 @@ lower_stmt :: (ctx: *LirContext, stmt: *AstStmt)
 lower_read_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue
 lower_write_identifier :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock)
 
+try_remove_trivial_phi :: (ctx: *LirContext, phi: *LirValue) -> *LirValue {
+  same: *LirValue = null;
+  i: u32 = 0;
+  while i < len(phi.args) / PTR_SIZE {
+    op: *LirValue = phi.args[i];
+    i = i + 1;
+    if (op == same || op == phi)  continue;
+    if same != null  return phi;
+    same = op;
+  }
+  //TODO Replace this simple undef with an actual removal in users of this phi
+  phi.opcode = Op_undef;
+  return same;
+}
+
 add_phi_operands :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock) -> *LirValue {
   i: u32 = 0;
   while i < len(block.predecessors) / PTR_SIZE {
@@ -1617,13 +1639,29 @@ add_phi_operands :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *
     append(&val.args, &arg, PTR_SIZE);
     i = i + 1;
   }
-  return val;
+  return try_remove_trivial_phi(ctx, val);
+}
+
+seal_block :: (ctx: *LirContext, block: *LirBasicBlock) {
+  i: u32 = 0;
+  while i < len(block.incomplete_phis) / PTR_SIZE {
+    def: *LirVariableDef = block.incomplete_phis[i];
+    add_phi_operands(ctx, def.name, def.val, block);
+    i = i + 1;
+  }
+  block.sealed = true;
 }
 
 lower_read_recursive_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue {
 
   val: *LirValue;
-  if len(block.predecessors) == PTR_SIZE {
+  if !block.sealed {
+    val = create_lir_value(ctx, Op_phi, null);
+    def: *LirVariableDef = malloc(sizeof(LirVariableDef));
+    def.name = identifier;
+    def.val = val;
+    append(&block.incomplete_phis, &def, PTR_SIZE);
+  } else if len(block.predecessors) == PTR_SIZE {
     val = lower_read_identifier(ctx, identifier, block.predecessors[0]);
   } else {
     val = create_lir_value(ctx, Op_phi, null);
@@ -1800,14 +1838,24 @@ lower_while_stmt :: (ctx: *LirContext, _while: WhileAstStmt) {
   append(&body_bb.predecessors, &entry_bb, PTR_SIZE);
   
   cond: *LirValue = lower_expr(ctx, _while.condition);
+  exit_jmp: *LirValue = create_lir_value(ctx, Op_jnz, null);
   
   lower_block(ctx, _while.body);
   
-  last_block: *LirBasicBlock = ctx.current_block;
+  last_bb: *LirBasicBlock = ctx.current_block;
+  append(&body_bb.predecessors, &last_bb, PTR_SIZE);
+  seal_block(ctx, last_bb);
+  loop_jmp: *LirValue = create_lir_value(ctx, Op_jmp, null);
+  loop_jmp.aux = body_bb.id;
   
   exit_bb: *LirBasicBlock = start_basic_block(ctx);
   append(&exit_bb.predecessors, &entry_bb, PTR_SIZE);
-  append(&exit_bb.predecessors, &last_block, PTR_SIZE);
+  append(&exit_bb.predecessors, &last_bb, PTR_SIZE);
+  
+  append(&exit_jmp.args, &cond, PTR_SIZE);
+  exit_jmp.aux = exit_bb.id;
+  
+  seal_block(ctx, exit_bb);
 }
 
 lower_stmt :: (ctx: *LirContext, stmt: *AstStmt) {
@@ -1831,7 +1879,8 @@ lower_func :: (ctx: *LirContext, func: *FunctionDecl, name: *u8) -> *LirFunction
   
   ctx.current_func = result;
   
-  start_basic_block(ctx);
+  entry: *LirBasicBlock = start_basic_block(ctx);
+  seal_block(ctx, entry);
   lower_block(ctx, func.block);
 
   return result;
@@ -1874,6 +1923,8 @@ name_of_lir_opcode :: (op: LirOpcode) -> *u8 {
   if op == Op_jmp  return "jmp";
   if op == Op_je  return "je";
   if op == Op_jne  return "jne";
+  if op == Op_jz  return "jz";
+  if op == Op_jnz  return "jnz";
   if op == Op_call  return "call";
   if op == Op_ret  return "ret";
 
@@ -1898,15 +1949,18 @@ name_of_lir_opcode :: (op: LirOpcode) -> *u8 {
 }
 
 output_lir_value :: (val: *LirValue) {
-  printf("\t%%%lu = %s", val.id, name_of_lir_opcode(val.opcode));
-  i : u32 = 0;
-  while i < (len(val.args) / PTR_SIZE) {
-    arg: *LirValue = val.args[i];
-    printf(" %%%lu", arg.id);
-    i = i + 1;
+  if val.opcode != Op_undef {
+    printf("\t%%%lu = %s", val.id, name_of_lir_opcode(val.opcode));
+    i : u32 = 0;
+    while i < (len(val.args) / PTR_SIZE) {
+      arg: *LirValue = val.args[i];
+      printf(" %%%lu", arg.id);
+      i = i + 1;
+    }
+    if val.opcode >= Op_const32 && val.opcode <= Op_const64  printf(" %lu", val.aux);
+    if val.opcode >= Op_jmp && val.opcode <= Op_jnz  printf(" b%lu", val.aux);
+    printf("\n");
   }
-  if val.opcode >= Op_const32 && val.opcode <= Op_const64  printf(" %lu", val.aux);
-  printf("\n");
 }
 
 output_lir_block :: (block: *LirBasicBlock) {
