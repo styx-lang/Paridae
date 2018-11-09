@@ -97,6 +97,16 @@ append :: (slice: *[]u8, val: *void, val_size: u32 ) {
   p_slice.len = p_slice.len + val_size;
 }
 
+pop :: (slice: *[]u8, val_size: u32) {
+  p_slice: *_paridae_slice = slice;
+  if p_slice.len > 0 {
+    p_slice.len = p_slice.len - val_size;
+  } else {
+    printf("Popping value from empty slice\n");
+    exit(-1);
+  }
+}
+
 PTR_SIZE : u32 = 8;
 
 c_str :: (s: []s8) -> *s8 {
@@ -1554,6 +1564,7 @@ LirBasicBlockKind :: enum {
 }
 
 LirBasicBlock :: struct {}
+LiveSet :: struct {}
 
 LirBasicBlock :: struct {
   id: u64,
@@ -1562,6 +1573,7 @@ LirBasicBlock :: struct {
   predecessors: []*LirBasicBlock,
   incomplete_phis: []*LirVariableDef,
   sealed: bool,
+  live_in: *LiveSet,
 }
 
 LirFunction :: struct {
@@ -1836,6 +1848,7 @@ lower_while_stmt :: (ctx: *LirContext, _while: WhileAstStmt) {
   entry_bb: *LirBasicBlock = ctx.current_block;
   body_bb: *LirBasicBlock = start_basic_block(ctx);
   append(&body_bb.predecessors, &entry_bb, PTR_SIZE);
+  append(&entry_bb.successors, &body_bb, PTR_SIZE);
   
   cond: *LirValue = lower_expr(ctx, _while.condition);
   exit_jmp: *LirValue = create_lir_value(ctx, Op_jnz, null);
@@ -1851,6 +1864,9 @@ lower_while_stmt :: (ctx: *LirContext, _while: WhileAstStmt) {
   exit_bb: *LirBasicBlock = start_basic_block(ctx);
   append(&exit_bb.predecessors, &entry_bb, PTR_SIZE);
   append(&exit_bb.predecessors, &last_bb, PTR_SIZE);
+  append(&entry_bb.successors, &exit_bb, PTR_SIZE);
+  append(&last_bb.successors, &exit_bb, PTR_SIZE);
+  append(&last_bb.successors, &body_bb, PTR_SIZE);
   
   append(&exit_jmp.args, &cond, PTR_SIZE);
   exit_jmp.aux = exit_bb.id;
@@ -2018,6 +2034,174 @@ lower_ast_to_lir :: (ast: []*AstItem) -> []*LirFunction {
   return ctx.functions;
 }
 
+//Register allocatior
+
+LiveSet :: struct {
+  data: []*LirValue,
+}
+
+set_create :: () -> *LiveSet {
+  live: *LiveSet = malloc(sizeof(LiveSet));
+  live.data = make(0);
+  return live;
+}
+
+set_add :: (set: *LiveSet, elem: *LirValue) {
+  i: u32 = 0;
+  found: bool = false;
+  while i < len(set.data) / PTR_SIZE {
+    if set.data[i] == elem {
+      found = true;
+      break;
+    }
+    i = i + 1;
+  }
+  if !found  append(&set.data, &elem, PTR_SIZE);
+}
+
+set_merge :: (a: *LiveSet, b: *LiveSet) {
+  i: u32 = 0;
+  while i < len(b.data) / PTR_SIZE {
+    set_add(a, b.data[i]);
+    i = i + 1;
+  }
+}
+
+set_remove :: (set: *LiveSet, elem: *LirValue) {
+  i: u32 = 0;
+  while i < len(set.data) / PTR_SIZE {
+    if set.data[i] == elem {
+      set.data[i] = set.data[len(set.data) / PTR_SIZE - 1];
+      pop(&set.data, PTR_SIZE);
+      break;
+    }
+    i = i + 1;
+  }
+}
+
+LiveInterval :: struct {
+  from: u32,
+  to: u32,
+  reg: u32,
+}
+
+add_range :: (intervals: *HashMap, vreg: *LirValue, from: u32, to: u32) {
+  interval: *LiveInterval = hashmap_lookup(intervals, vreg);
+  if !interval {
+    interval = malloc(sizeof(LiveInterval));
+    interval.from = from;
+    interval.to = to;
+    hashmap_insert(intervals, vreg, interval);
+  } else {
+    if interval.from > from  interval.from = from;
+    if interval.to < to  interval.to = to;
+  }
+}
+
+set_from :: (intervals: *HashMap, vreg: *LirValue, from: u32) {
+  interval: *LiveInterval = hashmap_lookup(intervals, vreg);
+  if !interval {
+    interval = malloc(sizeof(LiveInterval));
+    interval.from = from;
+    interval.to = from;
+    hashmap_insert(intervals, vreg, interval);
+  } else {
+    interval.from = from;
+  }
+}
+
+build_intervals :: (func: *LirFunction) -> *HashMap {
+
+  intervals: *HashMap = hashmap_create(128);
+
+  //Iterate through all blocks in reverse
+  i: s32 = (len(func.blocks) / PTR_SIZE) - 1;
+  while i >= 0 {
+  
+    //Construct the set *live* to be the union of all b's successors *liveIn*
+    live: *LiveSet = set_create();
+  
+    b: *LirBasicBlock = func.blocks[i];
+    
+    j: s32 = 0;    
+    while j < len(b.successors) / PTR_SIZE {
+      successor: *LirBasicBlock = b.successors[j];
+      if successor.id != b.id {
+        set_merge(live, successor.live_in);
+        
+        //TODO cache phi nodes in block
+        k: u32 = 0;
+        while k < len(successor.values) / PTR_SIZE {
+          val: *LirValue = successor.values[k];
+          if val.opcode == Op_phi {
+            l: u32 = 0;
+            while l < len(val.args) / PTR_SIZE {
+              set_add(live, val.args[l]);
+              l = l + 1;
+            }
+          }
+          k = k + 1;
+        }
+      }
+      
+      j = j + 1;
+    }
+    
+    //For all variables not yet defined in successors, extend the lifetime to the entire block
+    j = 0;
+    bb_from: *LirValue = b.values[0];
+    bb_to: *LirValue = b.values[len(b.values) / PTR_SIZE - 1];
+    while j < len(live.data) / PTR_SIZE {
+      operand: *LirValue = live.data[j];
+      add_range(intervals, operand, bb_from.id, bb_to.id);
+      j = j + 1;
+    }
+
+    //Scan in reverse through all the values in the block
+    //For all used values extend the lifetime to include this usage
+    //For all definitions finalize the variable
+    j = len(b.values) / PTR_SIZE - 1;
+    while j >= 0 {
+      op: *LirValue = b.values[j];
+      set_from(intervals, op, op.id);
+      set_remove(live, op);
+      k: u32 = 0;
+      while k < len(op.args) / PTR_SIZE {
+        set_add(live, op.args[k]);
+        add_range(intervals, op.args[k], bb_from.id, op.id);
+        k = k + 1;
+      }
+      j = j - 1;
+    }
+    
+    i = i - 1;
+    
+    //TODO Handle loop headers
+    
+    b.live_in = live;
+  }
+  
+  i = 0;
+  while i < intervals.size {
+    k: *LirValue = intervals.keys[i];
+    if k != null {
+      v: *LiveInterval = intervals.values[i];
+      printf("%lu: [%u - %u]\n", k.id, v.from, v.to);
+    }
+    i = i + 1;
+  }
+  
+  return intervals;
+}
+
+reg_alloc :: (functions: []*LirFunction) {
+  i: u32 = 0;
+  while i < len(functions) / PTR_SIZE {
+    intervals: *HashMap = build_intervals(functions[i]);
+    i = i + 1;
+  }
+}
+
 
 //Backend
 
@@ -2136,6 +2320,8 @@ _paridae_entry :: () -> s32 {
   items : []AstItem = parse(tokens);
 
   lir : []*LirFunction = lower_ast_to_lir(items);
+  
+  reg_alloc(lir);
 
   codegen("output.S", lir);
 
