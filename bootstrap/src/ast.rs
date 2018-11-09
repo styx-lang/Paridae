@@ -20,6 +20,7 @@ pub enum ItemKind {
     VariableDecl(Type, Option<Box<Expr>>),
     Directive(DirectiveKind),
     StructDecl(Type),
+    UnionDecl(Type),
     EnumDecl(Type)
 }
 
@@ -108,6 +109,7 @@ pub enum Type {
     Void,
     Function(Vec<Type>, Box<Type>),
     Struct(String, Vec<(String,Type)>),
+    Union(String, Vec<(String,Type)>),
     Enum(String, Vec<String>),
     Infer,
 }
@@ -136,12 +138,18 @@ pub enum BinaryOperatorKind {
     Subtraction,
     Product,
     Division,
+    Modulus,
     Less,
     LessEq,
     Greater,
     GreaterEq,
     Equality,
     NotEq,
+    And,
+    Or,
+    Xor,
+    LeftShift,
+    RightShift,
 }
 
 #[derive(Debug, Clone)]

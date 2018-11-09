@@ -6,8 +6,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-extern crate llvm_sys as llvm;
-
 use std::fs::File;
 use std::io::Write;
 use std::io::prelude::*;
@@ -19,7 +17,6 @@ mod tokens;
 mod ast;
 mod parser;
 mod c_codegen;
-mod type_checking;
 
 fn parse_source_file(filename: &str) -> Vec<ast::Item> {
     let mut file = File::open(filename).unwrap();
@@ -52,13 +49,13 @@ fn main() {
 
     let _ = env::set_current_dir(&Path::new(".."));
 
-    let mut items = parse_source_file("examples/enum.par");
+    let mut items = parse_source_file("src/compiler.par");
 
     items = execute_include_directives(items);
 
-    let typed_items = type_checking::check(items);
+    //let typed_items = type_checking::check(items);
 
-    let output = c_codegen::generate(typed_items);
+    let output = c_codegen::generate(items);
 
     let mut output_file = File::create("main.c").unwrap();
     let _ = output_file.write(output.as_bytes());

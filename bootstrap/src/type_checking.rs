@@ -125,7 +125,7 @@ fn check_binary_operator(op: BinaryOperatorKind, lhs: Expr, rhs: Expr, ctx: &mut
     let mut checked_lhs = check_expr(lhs, ctx);
     let mut checked_rhs = check_expr(rhs, ctx);
 
-    if checked_lhs.t != checked_rhs.t {
+    /*if checked_lhs.t != checked_rhs.t {
 
         if let Some(expr) = try_implicit_cast(checked_lhs.clone(), checked_rhs.t.clone(), ctx) {
             checked_lhs = expr;
@@ -134,7 +134,7 @@ fn check_binary_operator(op: BinaryOperatorKind, lhs: Expr, rhs: Expr, ctx: &mut
         } else {
             panic!("Binary operations can only be done on equal types: {:?} vs {:?}", checked_lhs, checked_rhs);
         }
-    }
+    }*/
 
     let _type = checked_lhs.t.clone();
 
@@ -221,6 +221,8 @@ fn check_member_access(owner: Expr, field_name: String, ctx: &mut TypeContext) -
 
         if let Type::Struct(struct_name, fields) = checked_owner.t.clone() {
             extract_field_type(struct_name, fields)
+        } else if let Type::Union(union_name, fields) = checked_owner.t.clone() {
+            extract_field_type(union_name, fields)
         } else if let Type::Ptr(box Type::Struct(struct_name, fields)) = checked_owner.t.clone() {
             extract_field_type(struct_name, fields)
         } else {
@@ -237,7 +239,7 @@ fn check_array_indexing(array: Expr, index: Expr, ctx: &mut TypeContext) -> Expr
     let checked_index = check_expr(index, ctx);
 
     match checked_index.t.clone() {
-        Type::Signed(_) => {},
+        Type::Signed(_) | Type::Unsigned(_) => {},
         other => panic!("Cannot access an array using a {:?} as index", other),
     }
 
@@ -312,13 +314,13 @@ fn check_assignment(place: Expr, value: Expr, ctx: &mut TypeContext) -> StmtKind
     let checked_place = check_expr(place, ctx);
     let mut checked_value = check_expr(value, ctx);
 
-    if checked_place.t != checked_value.t {
+    /*if checked_place.t != checked_value.t {
         if let Some(expr) = try_implicit_cast(checked_value.clone(), checked_place.t.clone(), ctx) {
             checked_value = expr;
         } else {
             panic!("Trying to assign value {:?} to place {:?}", checked_value, checked_place);
         }
-    }
+    }*/
 
     StmtKind::Assignment(box checked_place, box checked_value)
 }
@@ -421,7 +423,6 @@ fn check_const_decl(name: String, t: Type, expr: Expr, ctx: &mut TypeContext) ->
 fn check_enum_decl(t: Type, ctx: &mut TypeContext) -> ItemKind {
     if let Type::Enum(name, variants) = t.clone() {
         for variant in variants {
-            println!("Inserting symbol {}", variant);
             ctx.scope_arena[ctx.current].symbols.insert(variant, t.clone());
         }
     } else {
@@ -434,12 +435,12 @@ fn check_item(item: Item, ctx: &mut TypeContext) -> Item {
     use self::ItemKind::*;
 
     let name = item.name.clone();
-    println!("Checking {}", name);
     let kind = match item.node {
         FunctionDecl(box sig, block) => check_function_decl(name, sig, block, ctx),
         VariableDecl(t, expr) => check_variable_decl(name, t, expr, ctx),
         ConstDecl(t, box expr) => check_const_decl(name, t, expr, ctx),
         StructDecl(t) => StructDecl(t),
+        UnionDecl(t) => UnionDecl(t),
         EnumDecl(t) => check_enum_decl(t, ctx),
         Directive(k) => Directive(k)
     };

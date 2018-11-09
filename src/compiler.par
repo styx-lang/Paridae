@@ -1,0 +1,2334 @@
+/// Copyright (c) 2018 Lasse Dissing
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+
+//C headers
+
+//stdlib.h
+malloc :: (size: u64) -> *void
+calloc :: (num: u64, size: u64) -> *void
+realloc :: (ptr: *void, new_size: u64) -> *void
+free :: (ptr: *void)
+
+exit :: (status: int)
+
+atoi :: (str: *u8) -> int
+atof :: (str: *u8) -> f64
+
+//stdio.h
+
+fopen :: (filename: *u8, mode: *u8) -> *void
+fclose :: (stream: *void)
+
+fseek :: (stream: *void, offset: u64, origin: s32) -> s32
+ftell :: (stream: *void) -> u64
+rewind :: (stream: *void)
+
+fread :: (ptr: *void, size: u64, count: u64, fp: *void) -> u64
+fwrite :: (ptr: *void, size: u64, count: u64, fp: *void) -> u64
+fputs :: (ptr: *void, fp: *void) -> int
+
+putchar :: (ch: s32) -> s32
+getchar :: () -> s32
+
+//string.h
+
+strlen :: (str: *u8) -> u64
+strcmp :: (lhs: *u8, rhs: *u8) -> s32
+strncmp :: (lhs: *u8, rhs: *u8, num: u64) -> s32
+memcpy :: (dst: *void, src: *void, len: u64) -> *void
+
+//stdlib
+
+null : *void = 0;
+
+_paridae_slice :: struct {
+  ptr : *u8,
+  len : u32,
+  cap : u32,
+}
+
+len :: (slice: _paridae_slice) -> s32 {
+  return slice.len;
+}
+
+make :: (size: u64) -> []u8 {
+  slice : _paridae_slice;
+  if size == 0 {
+    slice.ptr = null;
+    slice.len = 0;
+    slice.cap = 0;
+  } else {
+    slice.ptr = cast(*u8, malloc(size));
+    slice.len = size;
+    slice.cap = size;
+  }
+  return slice;
+}
+
+realloc_slice :: (slice: []u8, new_size: u64) -> []u8 {
+  p_slice : _paridae_slice = cast([]u8, slice);
+  p_slice.ptr = realloc(p_slice.ptr, new_size);
+  p_slice.len = new_size;
+
+  return p_slice;
+}
+
+delete :: (slice: []u8) {
+  p_slice : _paridae_slice = cast([]u8, slice);
+  free(p_slice.ptr);
+}
+
+append :: (slice: *[]u8, val: *void, val_size: u32 ) {
+  p_slice : *_paridae_slice = slice;
+  if p_slice.len + val_size >= p_slice.cap {
+    if p_slice.cap == 0 {
+      p_slice.ptr = malloc(val_size);
+      p_slice.cap = val_size;
+    } else {
+      new_size : u32 = p_slice.cap * 2;
+      p_slice.ptr = realloc(p_slice.ptr, new_size);
+      p_slice.cap = new_size;
+    }
+  }
+  memcpy((p_slice.ptr + p_slice.len), val, val_size);
+  p_slice.len = p_slice.len + val_size;
+}
+
+pop :: (slice: *[]u8, val_size: u32) {
+  p_slice: *_paridae_slice = slice;
+  if p_slice.len > 0 {
+    p_slice.len = p_slice.len - val_size;
+  } else {
+    printf("Popping value from empty slice\n");
+    exit(-1);
+  }
+}
+
+PTR_SIZE : u32 = 8;
+
+c_str :: (s: []s8) -> *s8 {
+  raw : _paridae_slice = cast(_paridae_slice, s);
+  return cast(*s8, raw.ptr);
+}
+
+is_alphabetic :: (c: u8) -> bool {
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
+is_digit :: (c: u8) -> bool {
+  return c >= 48 && c <= 57;
+}
+
+is_alphanumeric :: (c: u8) -> bool {
+  return is_alphabetic(c) || is_digit(c);
+}
+
+//HashMap
+
+HashMap :: struct {
+  keys: []*void,
+  values: []*void,
+  size: u64,
+  load: u64,
+}
+
+hashmap_create :: (size: u64) -> *HashMap {
+  map : *HashMap = malloc(sizeof(HashMap));
+
+  map.size = size;
+  map.load = 0;
+  map.keys = make(size*PTR_SIZE);
+  map.values = make(size*PTR_SIZE);
+
+  i: u32 = 0;
+  while i < size {
+    map.keys[i] = null;
+    map.values[i] = null;
+    i = i + 1;
+  }
+
+  return map;
+}
+
+hashmap_hash :: (key: *void) -> u64 {
+  ad : u64 = cast(u64, key);
+  return (ad ^ (ad >> 16));
+}
+
+hashmap_insert :: (map: *HashMap, key: *void, value: *void) {
+  h : u64 = hashmap_hash(key) % map.size;
+  if map.load + 1 >= map.size {
+    printf("Hashmap of size %lu is full!\n", map.size);
+    exit(-1);
+  }
+  while (true) {
+    if (map.keys[h] == key)  {
+      map.values[h] = value;
+      break;
+    } else if (map.keys[h] == null) {
+      map.keys[h] = key;
+      map.values[h] = value;
+      map.load = map.load + 1;
+      break;
+    } else {
+      h = (h + 1) % map.size;
+    }
+  }
+}
+
+hashmap_lookup :: (map: *HashMap, key: *void) -> *void {
+  h : u64 = hashmap_hash(key) % map.size;
+  while (true) {
+    if (map.keys[h] == key)  return map.values[h];
+    if (map.keys[h] == null)  return null;
+    h = (h + 1) % map.size;
+  }
+}
+
+hashmap_destroy :: (map: *HashMap) {
+
+}
+
+//Tokens
+
+
+TokenType :: enum {
+    Invalid,
+    Identifier,
+    Directive,
+    EOF,
+    //Keywords
+    Break,
+    Cast,
+    Const,
+    Continue,
+    Defer,
+    Enum,
+    Else,
+    For,
+    If,
+    Return,
+    Struct,
+    Union,
+    While,
+    //Operators and punctuation
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    LessLess,
+    GreaterGreater,
+    And,
+    AndAnd,
+    Or,
+    OrOr,
+    Hat,
+    Equal,
+    Bang,
+    BangEqual,
+    EqualEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+    LeftParen,
+    RightParen,
+    LeftBracket,
+    RightBracket,
+    LeftCurly,
+    RightCurly,
+    Comma,
+    Dot,
+    Colon,
+    ColonColon,
+    Semicolon,
+    Arrow,
+    //Literals
+    Integer,
+    Float,
+    String,
+    True,
+    False,
+}
+
+Token :: struct {
+  type: TokenType,
+  position: u32,
+  lexeme: *u8,
+}
+
+
+//Lexer
+
+
+LexingContext :: struct {
+  start: u64,
+  current: u64,
+  line: u64,
+  source: *u8,
+  source_len: u64,
+  tokens: []Token,
+  current_token_idx: u64,
+}
+
+is_done_lexing :: (ctx: *LexingContext) -> bool {
+  return ctx.current >= ctx.source_len;
+}
+
+peek_token :: (ctx: *LexingContext, offset: u64) -> u8 {
+  if is_done_lexing(ctx) return 0;
+  return ctx.source[ctx.current + offset];
+}
+
+advance :: (ctx: *LexingContext) -> u8 {
+  ctx.current = ctx.current + 1;
+  return ctx.source[ctx.current - 1];
+}
+
+add_simple_token :: (ctx: *LexingContext, token_type: TokenType) {
+  token : Token;
+  token.type = token_type;
+  token.lexeme = null;
+  token.position = ctx.line;
+  append(&ctx.tokens, &token, sizeof(Token));
+  ctx.current_token_idx = ctx.current_token_idx + 1;
+}
+
+add_lookahead_conditional_token :: (ctx: *LexingContext, expect: u8, first: TokenType, second: TokenType) {
+  token : Token;
+  token.lexeme = null;
+  token.position = ctx.line;
+  if peek_token(ctx,0) == expect {
+    advance(ctx);
+    token.type = first;
+  } else {
+    token.type = second;
+  }
+  append(&ctx.tokens, &token, sizeof(Token));
+  ctx.current_token_idx = ctx.current_token_idx + 1;
+}
+
+get_lexeme :: (ctx: *LexingContext) -> *u8 {
+  str_len: u64 = ctx.current - ctx.start;
+  str: *u8 = malloc(str_len + 1);
+  memcpy(str, &ctx.source[ctx.start], str_len);
+  str[str_len] = 0;
+  return str;
+}
+
+add_lexeme_token :: (ctx: *LexingContext, lexeme: *u8, token_type: TokenType) {
+  token : Token;
+  token.type = token_type;
+  token.lexeme = lexeme;
+  token.position = ctx.line;
+  append(&ctx.tokens, &token, sizeof(Token));
+  ctx.current_token_idx = ctx.current_token_idx + 1;
+}
+
+single_line_comment :: (ctx: *LexingContext) {
+  while (peek_token(ctx, 0) != 10 && !is_done_lexing(ctx)) advance(ctx);
+}
+
+is_keyword :: (s: *u8) -> TokenType {
+  //TODO Replace this with a hashtable or at least a match
+
+  if !strcmp(s, "break")  return Break;
+  if !strcmp(s, "cast")  return Cast;
+  if !strcmp(s, "continue")  return Continue;
+  if !strcmp(s, "defer")  return Defer;
+  if !strcmp(s, "enum")  return Enum;
+  if !strcmp(s, "else")  return Else;
+  if !strcmp(s, "false")  return False;
+  if !strcmp(s, "for")  return For;
+  if !strcmp(s, "if")  return If;
+  if !strcmp(s, "return")  return Return;
+  if !strcmp(s, "struct")  return Struct;
+  if !strcmp(s, "union")  return Union;
+  if !strcmp(s, "true")  return True;
+  if !strcmp(s, "while")  return While;
+  return Invalid;
+}
+
+lex_string :: (ctx: *LexingContext) {
+
+  start_line : u64 = ctx.line;
+  
+  while peek_token(ctx, 0) != 34 && !is_done_lexing(ctx) {
+    if peek_token(ctx, 0) == 10  ctx.line = ctx.line + 1;
+    advance(ctx);
+  }
+
+  if is_done_lexing(ctx) {
+    printf("Unterminated string starting on line %lu", start_line);
+    exit(-1);
+  }
+
+  //Consume closing "
+  advance(ctx);
+
+  lexeme : *u8 = get_lexeme(ctx);
+  add_lexeme_token(ctx, lexeme, String);
+}
+
+lex_number :: (ctx: *LexingContext) {
+
+  while is_digit(peek_token(ctx,0))  advance(ctx);
+  dot_encountered : bool = false;
+  if peek_token(ctx,0) == 46 && is_digit(peek_token(ctx,1)) {
+    dot_encountered = true;
+    advance(ctx);
+    while is_digit(peek_token(ctx,0))  advance(ctx);
+  }
+
+  lexeme : *u8 = get_lexeme(ctx);
+  t : TokenType; 
+  if dot_encountered  t = Float;
+  else  t = Integer;
+
+  add_lexeme_token(ctx, lexeme, t);
+}
+
+lex_identifier :: (ctx: *LexingContext) {
+  while (is_alphanumeric(peek_token(ctx, 0)) || peek_token(ctx, 0) == 95) advance(ctx);
+  lexeme : *u8 = get_lexeme(ctx);
+  keyword : TokenType = is_keyword(lexeme);
+  if keyword != Invalid add_simple_token(ctx, keyword);
+  else add_lexeme_token(ctx, lexeme, Identifier);
+}
+
+scan_token :: (ctx: *LexingContext) {
+  c : u8 = advance(ctx);
+
+  //TODO Implement char literals such that we can replace the raw ASCII values here
+  //TODO A match statement would also be quite nice here
+  if c == 40 add_simple_token(ctx, LeftParen);
+  else if c == 41 add_simple_token(ctx, RightParen);
+  else if c == 91 add_simple_token(ctx, LeftBracket);
+  else if c == 93 add_simple_token(ctx, RightBracket);
+  else if c == 123 add_simple_token(ctx, LeftCurly);
+  else if c == 125 add_simple_token(ctx, RightCurly);
+  else if c == 43 add_simple_token(ctx, Plus);
+  else if c == 42 add_simple_token(ctx, Star);
+  else if c == 37 add_simple_token(ctx, Percent);
+  else if c == 94 add_simple_token(ctx, Hat);
+  else if c == 59 add_simple_token(ctx, Semicolon);
+  else if c == 46 add_simple_token(ctx, Dot);
+  else if c == 44 add_simple_token(ctx, Comma);
+  else if c == 45 add_lookahead_conditional_token(ctx, 62, Arrow, Minus);
+  else if c == 58 add_lookahead_conditional_token(ctx, 58, ColonColon, Colon);
+  else if c == 61 add_lookahead_conditional_token(ctx, 61, EqualEqual, Equal);
+  else if c == 33 add_lookahead_conditional_token(ctx, 61, BangEqual, Bang);
+  else if c == 38 add_lookahead_conditional_token(ctx, 38, AndAnd, And);
+  else if c == 124 add_lookahead_conditional_token(ctx, 124, OrOr, Or);
+  else if c == 60 {
+     n1 : u8 = peek_token(ctx, 0);
+     if n1 == 60 {advance(ctx); add_simple_token(ctx, LessLess);}
+     else if n1 == 61 {advance(ctx); add_simple_token(ctx, LessEqual);}
+     else add_simple_token(ctx, Less);
+  }
+  else if c == 62 {
+     n2 : u8 = peek_token(ctx, 0);
+     if n2 == 62 {advance(ctx); add_simple_token(ctx, GreaterGreater);}
+     else if n2 == 61 {advance(ctx); add_simple_token(ctx, GreaterEqual);}
+     else add_simple_token(ctx, Greater);
+  }
+  else if c == 47 {
+    if peek_token(ctx, 0) == 47 single_line_comment(ctx);
+    else add_simple_token(ctx, Slash);
+  }
+  else if c == 32 || c ==  9 {}
+  else if c == 10 ctx.line = ctx.line + 1;
+  else if c == 34 lex_string(ctx);
+  else {
+    if is_digit(c) lex_number(ctx);
+    else if (is_alphabetic(c) || c == 95) lex_identifier(ctx);
+    else {
+      printf("Unexpected character %c = %d on line %lu\n", c, c, ctx.line);
+      exit(-1);
+    }
+  }
+}
+
+lex :: (source: *u8, source_len: u64) -> []Token {
+
+
+  ctx : *LexingContext = cast(*LexingContext, malloc(sizeof(LexingContext)));
+  ctx.source = source;
+  ctx.source_len = source_len;
+  ctx.start = 0;
+  ctx.current = 0;
+  ctx.line = 1;
+  ctx.tokens = make(0);
+  ctx.current_token_idx = 0;
+
+  while !is_done_lexing(ctx) {
+    ctx.start = ctx.current;
+    scan_token(ctx);
+  }
+
+  tokens : []Token = ctx.tokens;
+
+  free(ctx);
+  
+  return tokens;
+}
+
+//AST
+
+//Forward declarations
+
+AstType :: struct {}
+AstExpr :: struct {}
+AstStmt :: struct {}
+AstItem :: struct {}
+AstBlock :: struct {}
+
+IntegerSize :: enum {
+  I8,
+  I16,
+  I32,
+  I64,
+  Int_Arch,
+  Int_Unspecified,
+}
+
+FloatingSize :: enum {
+  F32,
+  F64,
+  Float_Unspecified,
+}
+
+AstTypeKind :: enum {
+  AstType_Bool,
+  AstType_Signed,
+  AstType_Unsigned,
+  AstType_Float,
+  AstType_Array,
+  AstType_Slice,
+  AstType_Ptr,
+  AstType_Void,
+  AstType_Function,
+  AstType_DataStructure,
+  AstType_Infer,
+}
+
+AstTypeNode :: union {
+  integer: IntegerSize,
+  floating: FloatingSize,
+  slice: *AstType,
+  ptr: *AstType,
+  function: *AstType,
+  data_structure: *u8,
+}
+
+AstType :: struct {
+  tag: AstTypeKind,
+  node: AstTypeNode,
+}
+
+LiteralKind :: enum {
+  Lit_Int,
+  Lit_Float,
+  Lit_Bool,
+  Lit_Str,
+}
+
+LiteralValue :: union {
+  floating: f64,
+  integer: u64,
+  boolean: bool,
+  str: *u8,
+}
+
+Literal :: struct {
+  tag: LiteralKind,
+  val: LiteralValue,
+}
+
+
+UnaryOperatorKind :: enum {
+  // "*" operator for dereferencing pointers
+  Unary_Deref,
+  // "&" operator for taking the address of a place
+  Unary_Refer,
+  // "-" operator for numerical negation
+  Unary_Negation,
+  // "!" for logical not
+  Unary_Complement,
+}
+
+BinaryOperatorKind :: enum {
+  Bin_Invalid, //Temporary until we get option types
+  //Aritmetic operators
+  Bin_Addition,
+  Bin_Subtraction,
+  Bin_Product,
+  Bin_Division,
+  Bin_Modulus,
+
+  //Comperative operators
+  Bin_Less,
+  Bin_LessEq,
+  Bin_Greater,
+  Bin_GreaterEq,
+  Bin_Equality,
+  Bin_NotEq,
+
+  //Bitwise operators
+  Bin_BAnd,
+  Bin_BOr,
+  Bin_BXor,
+  Bin_LeftShift,
+  Bin_RightShift,
+
+  //Logical operators
+  Bin_And,
+  Bin_Or,
+}
+
+BinaryAstExpr :: struct {
+  operator: BinaryOperatorKind,
+  left: *AstExpr,
+  right: *AstExpr,
+}
+
+CastAstExpr :: struct {
+  target_type: *AstType,
+  inner: *AstExpr,
+}
+
+CallAstExpr :: struct {
+  func: *AstExpr,
+  args: []*AstExpr,
+}
+
+ConditionalAstExpr :: struct {
+  condition: *AstExpr,
+  then: *AstBlock,
+  otherwise: *AstBlock,
+}
+
+IndexingAstExpr :: struct {
+  array: *AstExpr,
+  index: *AstExpr,
+}
+
+FieldAstExpr :: struct {
+  strct: *AstExpr,
+  field_name: *u8,
+}
+
+UnaryAstExpr :: struct {
+  operator: UnaryOperatorKind,
+  inner: *AstExpr,
+}
+
+AstExprNode :: union {
+  binary: BinaryAstExpr,
+  _cast: CastAstExpr,
+  call: CallAstExpr,
+  identifier: *u8,
+  conditional: ConditionalAstExpr,
+  index: IndexingAstExpr,
+  literal: Literal,
+  field: FieldAstExpr,
+  unary: UnaryAstExpr,
+}
+
+AstExprKind :: enum {
+  AstExpr_Binary,
+  AstExpr_Cast,
+  AstExpr_Call,
+  AstExpr_Identifier,
+  AstExpr_Conditional,
+  AstExpr_Indexing,
+  AstExpr_Literal,
+  AstExpr_Field,
+  AstExpr_Unary,
+}
+
+AstExpr :: struct {
+  tag: AstExprKind,
+  node: AstExprNode,
+}
+
+
+AssignmentAstStmt :: struct {
+  lhs: *AstExpr,
+  rhs: *AstExpr,
+}
+
+WhileAstStmt :: struct {
+  condition: *AstExpr,
+  body: *AstBlock,
+}
+
+AstStmtNode :: union {
+  assignment: AssignmentAstStmt,
+  item: *AstItem,
+  expr: *AstExpr,
+  _return: *AstExpr,
+  _defer: *AstExpr,
+  _while: WhileAstStmt,
+}
+
+AstStmtKind :: enum {
+  AstStmt_Assignment,
+  AstStmt_Item,
+  AstStmt_AstExpr,
+  AstStmt_Return,
+  AstStmt_Break,
+  AstStmt_Continue,
+  AstStmt_Defer,
+  AstStmt_While,
+  AstStmt_Empty,
+}
+
+AstStmt :: struct {
+  tag: AstStmtKind,
+  node: AstStmtNode,
+}
+
+AstBlock :: struct {
+  stmts: []*AstStmt,
+  num_stmts: u32,
+}
+
+Signature :: struct {
+  input_types: []*AstType,
+  input_names: []*u8,
+  output: *AstType,
+}
+
+FunctionDecl :: struct {
+  signature: Signature,
+  block: *AstBlock,
+}
+
+VariableDecl :: struct {
+  type: *AstType,
+  value: *AstExpr,
+}
+
+CompoundTypeDecl :: struct {
+  field_names: []*u8,
+  field_types: []*AstType,
+}
+
+AstItemKind :: enum {
+  AstItem_Function,
+  AstItem_Variable,
+  AstItem_Enum,
+  AstItem_Struct,
+  AstItem_Union,
+}
+
+AstItemNode :: union {
+  function: FunctionDecl,
+  variable: VariableDecl,
+  compound_type: CompoundTypeDecl,
+}
+
+AstItem :: struct {
+  name: *u8,
+  tag: AstItemKind,
+  node: AstItemNode,
+}
+
+//Parser
+
+ParsingContext :: struct {
+  current_token: u64,
+  tokens: []Token,
+  items: []AstItem,
+}
+
+is_done_parsing :: (ctx: *ParsingContext) -> bool {
+  return len(ctx.tokens) / sizeof(Token) == ctx.current_token;
+}
+
+accept :: (ctx: *ParsingContext, token: TokenType) -> bool {
+  tok : Token = ctx.tokens[ctx.current_token];
+  if !is_done_parsing(ctx) && tok.type == token {
+    ctx.current_token = ctx.current_token + 1;
+    return true;
+  }
+  return false;
+}
+
+expect :: (ctx: *ParsingContext, token: TokenType) -> bool {
+  if accept(ctx, token) {
+    return true;
+  } else {
+    tok : Token = ctx.tokens[ctx.current_token];
+    printf("Expected %d but got %d on line %d\n", token, tok.type, tok.position);
+    exit(-1);
+  }
+}
+
+look_ahead :: (ctx: *ParsingContext, offset: u64) -> Token {
+  if ctx.current_token == len(ctx.tokens) {
+    eof_tok : Token;
+    eof_tok.type = EOF;
+    return eof_tok;
+  } else  return ctx.tokens[ctx.current_token + offset];
+}
+
+consume :: (ctx: *ParsingContext) -> Token {
+  ctx.current_token = ctx.current_token + 1;
+  return ctx.tokens[ctx.current_token - 1];
+}
+
+simple_type_by_name :: (name: *u8) -> *AstType {
+  node: AstTypeNode;
+  kind: AstTypeKind;
+  if !strcmp("int", name) { kind = AstType_Signed; node.integer = I32; }
+  else if !strcmp("float", name) { kind = AstType_Float; node.floating = F64; }
+  else if !strcmp("s8", name) { kind = AstType_Signed; node.integer = I8; }
+  else if !strcmp("s16", name) { kind = AstType_Signed; node.integer = I16; }
+  else if !strcmp("s32", name) { kind = AstType_Signed; node.integer = I32; }
+  else if !strcmp("s64", name) { kind = AstType_Signed; node.integer = I64; }
+  else if !strcmp("u8", name) { kind = AstType_Unsigned; node.integer = I8; }
+  else if !strcmp("u16", name) { kind = AstType_Unsigned; node.integer = I16; }
+  else if !strcmp("u32", name) { kind = AstType_Unsigned; node.integer = I32; }
+  else if !strcmp("u64", name) { kind = AstType_Unsigned; node.integer = I64; }
+  else if !strcmp("f32", name) { kind = AstType_Unsigned; node.integer = F32; }
+  else if !strcmp("f64", name) { kind = AstType_Float; node.floating = F64; }
+  else if !strcmp("f64", name) { kind = AstType_Float; node.floating = F64; }
+  else if !strcmp("bool", name) { kind = AstType_Bool; }
+  else if !strcmp("void", name) { kind = AstType_Void; }
+  else { kind = AstType_DataStructure; node.data_structure = name; }
+  type: *AstType = malloc(sizeof(AstType));
+  type.tag = kind;
+  type.node = node;
+  return type;
+}
+
+parse_type :: (ctx: *ParsingContext) -> *AstType {
+  node: AstTypeNode;
+  kind: AstTypeKind;
+
+  token: Token = consume(ctx);
+  if token.type == Identifier {
+    return simple_type_by_name(token.lexeme);
+  } else if token.type == Star {
+    kind = AstType_Ptr;
+    node.ptr = parse_type(ctx);
+  } else if token.type == LeftBracket {
+    expect(ctx, RightBracket);
+    kind = AstType_Slice;
+    node.slice = parse_type(ctx);
+  } else {
+    printf("Expected type but got %d on line %d", token.type, token.position);
+    exit(-1);
+  }
+  
+  type: *AstType = malloc(sizeof(AstType));
+  type.tag = kind;
+  type.node = node;
+
+  return type;
+}
+
+get_infer_type :: () -> *AstType {
+  type: *AstType = malloc(sizeof(AstType));
+  type.tag = AstType_Infer;
+  return type;
+}
+
+convert_token_to_binary_operator :: (tok: TokenType) -> BinaryOperatorKind {
+  if tok == Plus  return Bin_Addition;
+  else if tok == Minus  return Bin_Subtraction;
+  else if tok == Star  return Bin_Product;
+  else if tok == Slash  return Bin_Division;
+  else if tok == Percent  return Bin_Modulus;
+  else if tok == Less  return Bin_Less;
+  else if tok == LessEqual  return Bin_LessEq;
+  else if tok == Greater  return Bin_Greater;
+  else if tok == GreaterEqual  return Bin_GreaterEq;
+  else if tok == EqualEqual  return Bin_Equality;
+  else if tok == BangEqual  return Bin_NotEq;
+  else if tok == AndAnd  return Bin_And;
+  else if tok == OrOr  return Bin_Or;
+  else if tok == And  return Bin_BAnd;
+  else if tok == Or  return Bin_BOr;
+  else if tok == Hat  return Bin_BXor;
+  else if tok == LessLess  return Bin_LeftShift;
+  else if tok == GreaterGreater  return Bin_RightShift;
+  else  return Bin_Invalid;
+}
+
+get_binary_operator_precedence :: (op: BinaryOperatorKind) -> u32 {
+  if op == Bin_Product  return 10;
+  else if op == Bin_Division  return 10;
+  else if op == Bin_Modulus  return 10;
+  else if op == Bin_Addition  return 9;
+  else if op == Bin_Subtraction  return 9;
+  else if op == Bin_LeftShift  return 8;
+  else if op == Bin_RightShift  return 8;
+  else if op == Bin_BAnd  return 7;
+  else if op == Bin_BXor  return 6;
+  else if op == Bin_BOr  return 5;
+  else if op == Bin_Less  return 4;
+  else if op == Bin_LessEq  return 4;
+  else if op == Bin_Greater  return 4;
+  else if op == Bin_GreaterEq  return 4;
+  else if op == Bin_Equality  return 4;
+  else if op == Bin_NotEq  return 4;
+  else if op == Bin_And  return 3;
+  else if op == Bin_Or  return 2;
+  else return 0;
+}
+
+get_current_precedence :: (ctx: *ParsingContext) -> u32 {
+
+  if len(ctx.tokens) <= ctx.current_token {
+    return 0;
+  } else {
+    tok : Token = ctx.tokens[ctx.current_token];
+    bin_op_precedence : u32 = get_binary_operator_precedence(convert_token_to_binary_operator(tok.type));
+    if bin_op_precedence > 0  return bin_op_precedence;
+    else if tok.type == Dot  return 13;
+    else if (tok.type == LeftBracket || tok.type == LeftParen)  return 12;
+    else  return 0;
+  }
+}
+
+parse_expression :: (ctx: *ParsingContext, precedence: u32) -> *AstExpr
+
+parse_integer_literal :: (ctx: *ParsingContext, tok: Token) -> *AstExpr {
+  expr : *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Literal;
+  expr.node.literal.tag = Lit_Int;
+  expr.node.literal.val.integer = atoi(tok.lexeme);
+  return expr;
+}
+
+parse_float_literal :: (ctx: *ParsingContext, tok: Token) -> *AstExpr {
+  expr : *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Literal;
+  expr.node.literal.tag = Lit_Float;
+  expr.node.literal.val.floating = atof(tok.lexeme);
+  return expr;
+}
+
+parse_string_literal :: (ctx: *ParsingContext, tok: Token) -> *AstExpr {
+  expr : *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Literal;
+  expr.node.literal.tag = Lit_Str;
+  expr.node.literal.val.str = tok.lexeme;
+  return expr;
+}
+
+parse_bool_literal :: (ctx: *ParsingContext, tok: Token) -> *AstExpr {
+  expr : *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Literal;
+  expr.node.literal.tag = Lit_Bool;
+  expr.node.literal.val.boolean = tok.type == True;
+  return expr;
+}
+
+parse_identifier :: (ctx: *ParsingContext, tok: Token) -> *AstExpr {
+  expr : *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Identifier;
+  expr.node.identifier = tok.lexeme;
+  return expr;
+}
+
+parse_call :: (ctx: *ParsingContext, left: *AstExpr) -> *AstExpr {
+
+  result : *AstExpr = malloc(sizeof(AstExpr));
+  result.tag = AstExpr_Call;
+  result.node.call.func = left;
+  result.node.call.args = make(0);
+
+  if !accept(ctx, RightParen) {
+    while true {
+      expr : *AstExpr = parse_expression(ctx, 0);
+      append(&result.node.call.args, &expr, PTR_SIZE);
+      if !accept(ctx, Comma)  break;
+    }
+    expect(ctx, RightParen);
+  }
+
+  return result;
+
+}
+
+parse_cast :: (ctx: *ParsingContext) -> *AstExpr {
+
+  expr : *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Cast;
+   
+  expect(ctx, LeftParen);
+  expr.node._cast.target_type = parse_type(ctx);
+  expect(ctx, Comma);
+  expr.node._cast.inner = parse_expression(ctx, 0);
+  expect(ctx, RightParen);
+ 
+  return expr;
+}
+
+parse_prefix_operator :: (ctx: *ParsingContext, tok: Token) -> *AstExpr {
+  expr: *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Unary;
+
+  if tok.type == Minus  expr.node.unary.operator = Unary_Negation;
+  if tok.type == Bang  expr.node.unary.operator = Unary_Complement;
+  if tok.type == And  expr.node.unary.operator = Unary_Refer;
+  if tok.type == Star  expr.node.unary.operator = Unary_Deref;
+
+  expr.node.unary.inner = parse_expression(ctx, 11);
+
+  return expr;
+}
+
+parse_binary_operator :: (ctx: *ParsingContext, left: *AstExpr, operator: BinaryOperatorKind) -> *AstExpr {
+  precedence: u32 = get_binary_operator_precedence(operator);
+  right: *AstExpr = parse_expression(ctx, precedence);
+
+  expr: *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Binary;
+  expr.node.binary.operator = operator;
+  expr.node.binary.left = left;
+  expr.node.binary.right = right;
+
+  return expr;
+}
+
+parse_field_access :: (ctx: *ParsingContext, left: *AstExpr) -> *AstExpr {
+  field_token: Token = consume(ctx);
+  if field_token.type != Identifier {
+    printf("Token %d on line %d is not a valid field\n", field_token.type, field_token.position);
+    exit(-1);
+  }
+
+  expr: *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Field;
+  expr.node.field.field_name = field_token.lexeme;
+  expr.node.field.strct = left;
+
+  return expr;
+}
+
+parse_indexing :: (ctx: *ParsingContext, left: *AstExpr) -> *AstExpr {
+
+  expr: *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Indexing;
+  expr.node.index.index = parse_expression(ctx, 0);
+  expr.node.index.array = left;
+
+  expect(ctx, RightBracket);
+
+  return expr;
+}
+
+parse_infix_operator :: (ctx: *ParsingContext, left: *AstExpr, tok: Token) -> *AstExpr {
+
+  if tok.type == LeftParen  return parse_call(ctx, left);
+  if tok.type == Dot  return parse_field_access(ctx, left);
+  if tok.type == LeftBracket  return parse_indexing(ctx, left);
+
+  op : BinaryOperatorKind = convert_token_to_binary_operator(tok.type);
+  if op != Bin_Invalid {
+    return parse_binary_operator(ctx, left, op);
+  } else {
+    printf("Unsupported infix operator: %d on line %d\n", tok.type, tok.position);
+    exit(-1);
+  }
+}
+
+parse_block :: (ctx: *ParsingContext) -> *AstBlock
+
+parse_if :: (ctx: *ParsingContext) -> *AstExpr {
+
+  expr: *AstExpr = malloc(sizeof(AstExpr));
+  expr.tag = AstExpr_Conditional;
+  expr.node.conditional.condition = parse_expression(ctx, 0);
+  expr.node.conditional.then = parse_block(ctx);
+
+  if accept(ctx, Else) {
+    expr.node.conditional.otherwise = parse_block(ctx);
+  } else {
+    expr.node.conditional.otherwise = null;
+  }
+
+  return expr;
+}
+
+parse_expression :: (ctx: *ParsingContext, precedence: u32) -> *AstExpr {
+  tok: Token = consume(ctx);
+
+  left : *AstExpr;
+
+  if tok.type == Cast  left = parse_cast(ctx);
+  else if tok.type == Identifier  left = parse_identifier(ctx, tok);
+  else if tok.type == Integer  left = parse_integer_literal(ctx, tok);
+  else if tok.type == String  left = parse_string_literal(ctx, tok);
+  else if tok.type == Float  left = parse_float_literal(ctx, tok);
+  else if (tok.type == False || tok.type == True)  left = parse_bool_literal(ctx, tok);
+  else if (tok.type == Minus || tok.type == Bang || tok.type == And || tok.type == Star) left = parse_prefix_operator(ctx, tok);
+  else if tok.type == If  left = parse_if(ctx);
+  else if tok.type == LeftParen {
+    left = parse_expression(ctx, 0);
+    expect(ctx, RightParen);
+  } else {
+    printf("%d is not a valid expression prefix on line %d\n", tok.type, tok.position);
+    exit(-1);
+  }
+
+  while precedence < get_current_precedence(ctx) {
+    next_tok : Token = consume(ctx);
+    left = parse_infix_operator(ctx, left, next_tok);
+  }
+
+  return left;
+}
+
+parse_stmt :: (ctx: *ParsingContext) -> *AstStmt
+
+parse_block :: (ctx: *ParsingContext) -> *AstBlock {
+
+  block : *AstBlock = malloc(sizeof(AstBlock));
+  block.num_stmts = 0;
+
+  block.stmts = make(0);
+
+  next : Token = look_ahead(ctx, 0);
+  if next.type == LeftCurly {
+    expect(ctx, LeftCurly);
+    i : u32 = 0;
+    while !accept(ctx, RightCurly) {
+      stmt: *AstStmt = parse_stmt(ctx);
+      append(&block.stmts, &stmt, PTR_SIZE);
+      i = i + 1;
+    }
+    block.num_stmts = i;
+  } else {
+    stmt: *AstStmt = parse_stmt(ctx);
+    append(&block.stmts, &stmt, PTR_SIZE); 
+    block.num_stmts = 1;
+  }
+
+  return block;
+}
+
+parse_variable_decl :: (ctx: *ParsingContext) -> *AstItem
+
+parse_stmt :: (ctx: *ParsingContext) -> *AstStmt {
+
+  semicolon_exception : bool = false;
+
+  result : *AstStmt = malloc(sizeof(AstStmt));
+
+  if accept(ctx, Break) {
+    result.tag = AstStmt_Break;
+  } else if accept(ctx, Continue) {
+    result.tag = AstStmt_Continue;
+  } else if accept(ctx, Return) {
+    result.tag = AstStmt_Return;
+    result.node._return = parse_expression(ctx, 0);
+  } else if accept(ctx, Defer) {
+    result.tag = AstStmt_Defer;
+    result.node._defer = parse_expression(ctx, 0);
+  } else if accept(ctx, While) {
+    result.tag = AstStmt_While;
+    result.node._while.condition = parse_expression(ctx, 0);
+    result.node._while.body = parse_block(ctx);
+    semicolon_exception = true;
+  } else if accept(ctx, Semicolon) {
+    result.tag = AstStmt_Empty;
+  } else {
+
+    l1 : Token = look_ahead(ctx, 0);
+    l2 : Token = look_ahead(ctx, 1);
+
+    //TODO Full support for nested items. For now we only support variables
+    if l1.type == Identifier && l2.type == Colon {
+      result.tag = AstStmt_Item;
+      result.node.item = parse_variable_decl(ctx);
+    } else {
+      left : *AstExpr = parse_expression(ctx, 0);
+      next : Token = look_ahead(ctx, 0);
+
+      if left.tag == AstExpr_Conditional {
+        semicolon_exception = true;
+      }
+
+      if next.type == Equal {
+        result.tag = AstStmt_Assignment;
+        result.node.assignment.lhs = left;
+        expect(ctx, Equal);
+        result.node.assignment.rhs = parse_expression(ctx, 0);
+      } else if (semicolon_exception || next.type == Semicolon) {
+        result.tag = AstStmt_AstExpr;
+        result.node.expr = left;
+      } else {
+        printf("Unexpected token %d on line %d\n", next.type, next.position);
+      }
+    }
+  }
+
+  if !semicolon_exception  expect(ctx, Semicolon);
+
+  return result;
+}
+
+parse_variable_decl :: (ctx: *ParsingContext) -> *AstItem {
+
+  item: *AstItem = malloc(sizeof(AstItem));
+
+  identifier : Token = consume(ctx);
+  item.name = identifier.lexeme;
+  item.tag = AstItem_Variable;
+  expect(ctx, Colon);
+
+  if accept(ctx, Equal)  item.node.variable.type = get_infer_type();
+  else  item.node.variable.type = parse_type(ctx);
+
+  if accept(ctx, Equal)  item.node.variable.value = parse_expression(ctx, 0);
+  else  item.node.variable.value = null;
+
+  return item;
+}
+
+parse_struct_decl :: (ctx: *ParsingContext) -> *AstItem {
+  item: * AstItem = malloc(sizeof(AstItem));
+
+  identifier : Token = consume(ctx);
+  item.name = identifier.lexeme;
+  item.tag = AstItem_Struct;
+
+  expect(ctx, ColonColon);
+  expect(ctx, Struct);
+  expect(ctx, LeftCurly);
+
+  item.node.compound_type.field_names = make(0);
+  item.node.compound_type.field_types = make(0);
+
+  while !accept(ctx, RightCurly) {
+    token : Token = consume(ctx);
+    if token.type != Identifier {
+      printf("Expected field identifier on line %d but got %d\n", token.position, token.type);
+      exit(-1);
+    }
+    
+    append(&item.node.compound_type.field_names, &token.lexeme, PTR_SIZE);
+    expect(ctx, Colon);
+
+    type : *AstType = parse_type(ctx);
+    append(&item.node.compound_type.field_types, &type, PTR_SIZE);
+    expect(ctx, Comma);
+  }
+
+  return item;
+}
+
+parse_union_decl :: (ctx: *ParsingContext) -> *AstItem {
+item: * AstItem = malloc(sizeof(AstItem));
+
+  identifier : Token = consume(ctx);
+  item.name = identifier.lexeme;
+  item.tag = AstItem_Union;
+
+  expect(ctx, ColonColon);
+  expect(ctx, Union);
+  expect(ctx, LeftCurly);
+
+  item.node.compound_type.field_names = make(0);
+  item.node.compound_type.field_types = make(0);
+
+  while !accept(ctx, RightCurly) {
+    token : Token = consume(ctx);
+    if token.type != Identifier {
+      printf("Expected field identifier on line %d but got %d\n", token.position, token.type);
+      exit(-1);
+    }
+    append(&item.node.compound_type.field_names, &token.lexeme, PTR_SIZE);
+    expect(ctx, Colon);
+
+    type : *AstType = parse_type(ctx);
+    append(&item.node.compound_type.field_types, &type, PTR_SIZE);
+    expect(ctx, Comma);
+  }
+
+  return item;
+}
+
+parse_enum_decl :: (ctx: *ParsingContext) -> *AstItem {
+
+  item: * AstItem = malloc(sizeof(AstItem));
+
+  identifier : Token = consume(ctx);
+  item.name = identifier.lexeme;
+  item.tag = AstItem_Enum;
+
+  expect(ctx, ColonColon);
+  expect(ctx, Enum);
+  expect(ctx, LeftCurly);
+
+  item.node.compound_type.field_names = make(0);
+
+  while !accept(ctx, RightCurly) {
+    token : Token = consume(ctx);
+    if token.type != Identifier {
+      printf("Expected enum variant identifier on line %d but got %d\n", token.position, token.type);
+      exit(-1);
+    }
+    append(&item.node.compound_type.field_names, &token.lexeme, PTR_SIZE);
+    expect(ctx, Comma);
+  }
+
+  return item;
+}
+
+parse_signature :: (ctx: *ParsingContext) -> Signature {
+
+  sig: Signature;
+
+  sig.input_names = make(0);
+  sig.input_types = make(0);
+
+  expect(ctx, LeftParen);
+  if !accept(ctx, RightParen) {
+
+    while true {
+
+      name: Token = consume(ctx);
+      if name.type != Identifier {
+        printf("Unexpected token %d in function signature on line %d\n", name.type, name.position);
+        exit(-1);
+      }
+      expect(ctx, Colon);
+
+      type: *AstType = parse_type(ctx);
+      append(&sig.input_names, &name.lexeme, PTR_SIZE);
+      append(&sig.input_types, &type, PTR_SIZE);
+
+      if !accept(ctx, Comma) break;
+    }
+    expect(ctx, RightParen);
+  }
+
+  if accept(ctx, Arrow) {
+    sig.output = parse_type(ctx);
+  } else {
+    sig.output = malloc(sizeof(AstType));
+    sig.output.tag = AstType_Void;
+  }
+
+  return sig;
+}
+
+parse_function_decl :: (ctx: *ParsingContext) -> *AstItem {
+
+  item: * AstItem = malloc(sizeof(AstItem));
+
+  identifier : Token = consume(ctx);
+  item.name = identifier.lexeme;
+  item.tag = AstItem_Function;
+
+  expect(ctx, ColonColon);
+
+  parse_signature(ctx);
+
+  next: Token = look_ahead(ctx, 0);
+  if next.type == LeftCurly  item.node.function.block = parse_block(ctx);
+  else  item.node.function.block = null;
+
+  return item;
+}
+
+parse_item :: (ctx: *ParsingContext) -> *AstItem {
+  token : Token = look_ahead(ctx, 0);
+  if token.type != Identifier {
+    printf("Tried to parse an item starting with a %d on line %d\n", token.type, token.position);
+    exit(-1);
+  }
+
+  result : *AstItem;
+
+  look1 : Token = look_ahead(ctx, 1);
+  if look1.type == Colon  result = parse_variable_decl(ctx);
+  else if look1.type == ColonColon {
+    look2 : Token = look_ahead(ctx, 2); 
+    if look2.type == Enum  result = parse_enum_decl(ctx);
+    else if look2.type == Struct  result = parse_struct_decl(ctx);
+    else if look2.type == Union  result = parse_union_decl(ctx);
+    else if look2.type == LeftParen  result = parse_function_decl(ctx);
+    else {
+      printf("Unexpected token %d in item on line %d", look2.type, token.position);
+      exit(-1);
+    }
+  }
+  else {
+    printf("Unexpected token %d in item on line %d", look1.type, token.position);
+    exit(-1);
+  }
+
+  accept(ctx, Semicolon);
+
+  return result;
+}
+
+parse :: (tokens: []Token) -> []*AstItem {
+  items : []*AstItem = make(0);
+  ctx : *ParsingContext = malloc(sizeof(ParsingContext));
+  ctx.current_token = 0;
+  ctx.tokens = tokens;
+  ctx.items = items;
+
+  while !is_done_parsing(ctx) {
+    item : *AstItem = parse_item(ctx);
+    append(&items, &item, PTR_SIZE);
+  }
+
+  free(ctx);
+  return items;
+}
+
+
+//Hir
+
+Type :: struct {}
+
+TypeKind :: enum {
+  Type_Bool,
+  Type_Signed,
+  Type_Unsigned,
+  Type_Float,
+  Type_Array,
+  Type_Slice,
+  Type_Ptr,
+  Type_Void,
+  Type_Function,
+  Type_Enum,
+  Type_Struct,
+  Type_Union,
+}
+
+TypeNode :: union {
+  integer: IntegerSize,
+  floating: FloatingSize,
+  slice: *Type,
+  ptr: *Type,
+  function: *Type,
+  //_enum: *EnumType,
+  //_struct: *StructType,
+  //_union: *UnionType,
+}
+
+Type :: struct {
+  tag: TypeKind,
+  node: TypeNode,
+}
+
+lowering_ast_to_hir :: (ast: []*AstItem) {
+
+}
+
+//Type checking
+
+
+get_size_of_integer :: (size: IntegerSize) -> u32 {
+  if size == I8  return 1;
+  if size == I16  return 2;
+  if size == I32  return 4;
+  if size == I64  return 8;
+  if size == Int_Arch  return 8;
+  if size == Int_Unspecified  return 4;
+  return 0;
+}
+
+get_size_of_floating :: (size: FloatingSize) -> u32 {
+  if size == F32  return 4;
+  if size == F64  return 8;
+  if size == Float_Unspecified  return 4;
+  return 0;
+}
+
+get_size_of_type :: (type: *AstType) -> u32 {
+  if type.tag == 0  return 1;
+  if type.tag == 1  return get_size_of_integer(type.node.integer);
+  if type.tag == 2  return get_size_of_floating(type.node.floating);
+  else {
+    printf("Unable to determine size type %d\n", type.tag);
+    exit(-1);
+  }
+}
+
+
+//LIR
+
+LirOpcode :: enum {
+  //Aritmetics
+  Op_add,  // r1 = r2 + r3
+  Op_sub,  // r1 = r2 - r3
+  Op_mul,  // r1 = r2 * r3 (unsigned)
+  Op_imul, // r1 = r2 * r3 (signed)
+  Op_div, // r1 = r2 / r3 (unsigned)
+  Op_idiv, // r1 = r2 / r3 (signed)
+  Op_mod, // r1 = r2 % r3
+  Op_shl, // r1 = r2 >> r3
+  Op_shr, // r1 = r2 << r3 (Logical)
+  Op_sar, // r1 = r2 << r3 (Arithmetic)
+  
+  //Comparison
+  Op_le, // r1 < r2
+  Op_leq, // r1 <= r2
+  Op_ge, // r1 > r2
+  Op_geq, // r1 >= r2
+  Op_eq, // r1 > r2
+  Op_neq, // r1 >= r2
+
+  //Logic
+  Op_neg, // r1 = !r2 (0 -> 1 and everything else -> 0)
+  Op_not, // r1 = ~r2 (Bitwise inversion)
+  Op_and, // r1 = r2 & r3 (Bitwise and)
+  Op_or, // r1 = r2 | r3 (Bitwise or)
+  Op_xor, // r1 = r2 ^ r3 (Bitwise xor)
+
+  //Memory
+  Op_alloca, // allocates r1 bytes on the stack
+  Op_load, // loads the value at r2 into r1
+  Op_store, // stores the value at r1 into r2
+  Op_push, // pushes r1 onto the stack
+  Op_pop, // pops a value from the stack and stores it in r1
+
+  //Jumps
+  Op_jmp, // unconditional jump to address in r1
+  Op_je, // jump to address in r1 if r2 == r3
+  Op_jne, // jump to address in r1 if r2 != r3
+  Op_jz, // jump to address in r1 if r2 == 0
+  Op_jnz, // jump to address in r1 if r2 != 0
+  Op_call, // calls function r1 = fn(r2,..,rn)
+  Op_ret, //returns from the current function
+
+  //Jumps unsigned 
+  Op_ja, // jump to address in r1 if r2 > r3
+  Op_jae, // jump to address in r1 if r2 >= r3
+  Op_jb, // jump to address in r1 if r2 < r3
+  Op_jbe, // jump to address in r1 if r2 <= r3
+
+  //Jumps signed
+  Op_jg, // jump to address in r1 if r2 > r3
+  Op_jge, // jump to address in r1 if r2 >= r3
+  Op_jl, // jump to address in r1 if r2 < r3
+  Op_jle, // jump to address in r1 if r2 <= r3
+
+  //Constants
+  Op_const32, //introduces a 32 bit constant
+  Op_const64, //introduces a 64 bit constant
+
+  //Misc
+  Op_int, // invokes interrupt r1
+  Op_phi,
+  
+  //Pseudo operations
+  Op_undef,
+}
+
+lir_opcode_returns_value :: (op: LirOpcode) -> bool {
+  if op >= Op_add && op <= Op_xor  return true;
+
+  if op == Op_alloca || op == Op_load || op == Op_pop  return true;
+
+  if op ==  Op_call  return true;
+
+  return false;
+}
+
+LirValue :: struct  {}
+
+LirValue :: struct {
+  id: u64,
+  type: *Type,
+  opcode: LirOpcode,
+  aux: u64,
+  args: []*LirValue,
+}
+
+LirVariableDef :: struct {
+  name: *u8,
+  val: *LirValue,
+}
+
+LirBasicBlockKind :: enum {
+  Plain, //One direct successor
+  Branch, //Two successors selected based on a boolean condition
+  Exit, //No successors. Found at end of function
+}
+
+LirBasicBlock :: struct {}
+LiveSet :: struct {}
+
+LirBasicBlock :: struct {
+  id: u64,
+  values: []*LirValue,
+  successors: []*LirBasicBlock,
+  predecessors: []*LirBasicBlock,
+  incomplete_phis: []*LirVariableDef,
+  sealed: bool,
+  live_in: *LiveSet,
+}
+
+LirFunction :: struct {
+  name: *u8,
+  blocks: []*LirBasicBlock,
+  entry: *LirBasicBlock,
+}
+
+LirContext :: struct {
+  functions: []*LirFunction, 
+  current_block: *LirBasicBlock,
+  current_func: *LirFunction,
+  next_block_id: u64,
+  next_value_id: u64,
+  use_defs: *HashMap,
+}
+
+create_lir_value :: (ctx: *LirContext, opcode: LirOpcode, type: *Type) -> *LirValue {
+  val : *LirValue = malloc(sizeof(LirValue));
+  val.id = ctx.next_value_id;
+  ctx.next_value_id = ctx.next_value_id + 1;
+  val.opcode = opcode;
+  val.args = make(0);
+  val.type = type;
+  append(&ctx.current_block.values, &val, PTR_SIZE);
+
+  return val;
+}
+
+start_basic_block :: (ctx: *LirContext) -> *LirBasicBlock {
+  block : *LirBasicBlock = malloc(sizeof(LirBasicBlock));
+  block.id = ctx.next_block_id;
+  block.values = make(0);
+  block.successors = make(0);
+  block.predecessors = make(0);
+  block.incomplete_phis = make(0);
+  block.sealed = false;
+  
+  ctx.next_block_id = ctx.next_block_id + 1;
+  
+  ctx.current_block = block;
+  append(&ctx.current_func.blocks, &block, PTR_SIZE);
+  vars: *[]LirVariableDef = malloc(sizeof(_paridae_slice));
+  *vars = make(0);
+  hashmap_insert(ctx.use_defs, block, vars);
+  
+  return block;
+}
+
+
+lower_expr :: (ctx: *LirContext, expr: *AstExpr) -> *LirValue
+lower_stmt :: (ctx: *LirContext, stmt: *AstStmt)
+lower_read_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue
+lower_write_identifier :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock)
+
+try_remove_trivial_phi :: (ctx: *LirContext, phi: *LirValue) -> *LirValue {
+  same: *LirValue = null;
+  i: u32 = 0;
+  while i < len(phi.args) / PTR_SIZE {
+    op: *LirValue = phi.args[i];
+    i = i + 1;
+    if (op == same || op == phi)  continue;
+    if same != null  return phi;
+    same = op;
+  }
+  //TODO Replace this simple undef with an actual removal in users of this phi
+  phi.opcode = Op_undef;
+  return same;
+}
+
+add_phi_operands :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock) -> *LirValue {
+  i: u32 = 0;
+  while i < len(block.predecessors) / PTR_SIZE {
+    arg: *LirValue = lower_read_identifier(ctx, identifier, block.predecessors[i]);
+    append(&val.args, &arg, PTR_SIZE);
+    i = i + 1;
+  }
+  return try_remove_trivial_phi(ctx, val);
+}
+
+seal_block :: (ctx: *LirContext, block: *LirBasicBlock) {
+  i: u32 = 0;
+  while i < len(block.incomplete_phis) / PTR_SIZE {
+    def: *LirVariableDef = block.incomplete_phis[i];
+    add_phi_operands(ctx, def.name, def.val, block);
+    i = i + 1;
+  }
+  block.sealed = true;
+}
+
+lower_read_recursive_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue {
+
+  val: *LirValue;
+  if !block.sealed {
+    val = create_lir_value(ctx, Op_phi, null);
+    def: *LirVariableDef = malloc(sizeof(LirVariableDef));
+    def.name = identifier;
+    def.val = val;
+    append(&block.incomplete_phis, &def, PTR_SIZE);
+  } else if len(block.predecessors) == PTR_SIZE {
+    val = lower_read_identifier(ctx, identifier, block.predecessors[0]);
+  } else {
+    val = create_lir_value(ctx, Op_phi, null);
+    lower_write_identifier(ctx, identifier, val, block);
+    val = add_phi_operands(ctx, identifier, val, block);
+  }
+  lower_write_identifier(ctx, identifier, val, block);
+  return val;
+}
+
+//TODO These functions really suffer from lacking features
+//TODO They should be rewritten when we get field access on compound expressions and propper hashmaps
+
+lower_read_identifier :: (ctx: *LirContext, identifier: *u8, block: *LirBasicBlock) -> *LirValue {
+  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, block);
+ 
+  i: u32 = 0; 
+  while i < len(*vars) / sizeof(LirVariableDef) {
+    deref: []LirVariableDef = *vars;
+    v: LirVariableDef = deref[i];
+    if strcmp(v.name, identifier) == 0  return  v.val;
+    i = i + 1;
+  }
+  return lower_read_recursive_identifier(ctx, identifier, block);
+}
+
+lower_write_identifier :: (ctx: *LirContext, identifier: *u8, val: *LirValue, block: *LirBasicBlock) {
+  vars: *[]LirVariableDef = hashmap_lookup(ctx.use_defs, block);
+
+  found: bool = false;
+
+  i: u32 = 0; 
+  while i < len(*vars) / sizeof(LirVariableDef) {
+    deref: []LirVariableDef = (*vars);
+    v: LirVariableDef = deref[i];
+    if strcmp(v.name, identifier) == 0  {
+      v.val = val;
+      deref[i] = v;
+      found = true;
+      break;
+    }
+    i = i + 1;
+  }
+  if !found {
+    var: LirVariableDef;
+    var.name = identifier;
+    var.val = val;
+    append(vars, &var, sizeof(LirVariableDef));
+  }
+}
+
+lower_binary_expr :: (ctx: *LirContext, binary: *BinaryAstExpr) -> *LirValue {
+
+  op: LirOpcode; 
+
+  if binary.operator == Bin_Addition  op = Op_add;
+  else if binary.operator == Bin_Subtraction  op = Op_sub;
+  else if binary.operator == Bin_Product  op = Op_imul;
+  else if binary.operator == Bin_Division  op = Op_idiv;
+  else if binary.operator == Bin_Modulus  op = Op_mod;
+  
+  else if binary.operator == Bin_Less  op = Op_le;
+  else if binary.operator == Bin_LessEq  op = Op_leq;
+  else if binary.operator == Bin_Greater  op = Op_ge;
+  else if binary.operator == Bin_GreaterEq  op = Op_geq;
+  else if binary.operator == Bin_Equality  op = Op_eq;
+  else if binary.operator == Bin_NotEq  op = Op_neq;
+  
+  else if binary.operator == Bin_BAnd  op = Op_and;
+  else if binary.operator == Bin_BOr  op = Op_or;
+  else if binary.operator == Bin_BXor  op = Op_xor;
+  else if binary.operator == Bin_LeftShift  op = Op_shl;
+  else if binary.operator == Bin_RightShift  op = Op_sar; //TODO When to shr vs. sar
+  
+  else if binary.operator == Bin_And  op = Op_and;
+  else if binary.operator == Bin_Or  op = Op_or;
+  else {
+    printf("Unknown bin op %d\n", binary.operator);
+  }
+ 
+  left: *LirValue = lower_expr(ctx, binary.left);
+  right: *LirValue = lower_expr(ctx, binary.right);
+
+  val: *LirValue = create_lir_value(ctx, op, null);
+
+  append(&val.args, &left, PTR_SIZE);
+  append(&val.args, &right, PTR_SIZE);
+
+  return val;
+}
+
+lower_literal :: (ctx: *LirContext, literal: *Literal) -> *LirValue {
+  val: *LirValue = create_lir_value(ctx, Op_const32, null);
+  val.aux = literal.val.integer;
+
+  return val;
+}
+
+lower_call :: (ctx: *LirContext, call: CallAstExpr) -> *LirValue {
+
+  args: []*LirValue = make(0);
+
+  i: s32 = 0;
+  while i < len(call.args) / PTR_SIZE {
+    arg: *LirValue = lower_expr(ctx, call.args[i]);
+    append(&args, &arg, PTR_SIZE);
+    i = i + 1;
+  }
+  val: *LirValue = create_lir_value(ctx, Op_call, null);
+  val.aux = cast(u64, call.func.node.identifier);
+  
+  //TODO: This second loop is to ensure all the arguments are lowered before the call inst. 
+  //This can be removed when instruction scheduling at some points gets implemented
+  
+  i = 0;
+  while i < len(args) / PTR_SIZE {
+    append(&val.args, &(args[i]), PTR_SIZE);
+    i = i + 1;
+  }
+  
+  return val;
+}
+
+lower_conditional :: (ctx: *LirContext, condition: ConditionalAstExpr) -> *LirValue {
+  //val: *LirValue = create_lir_value(ctx, Op_call, null);
+  //val.aux = cast(u64, call.func.node.identifier);
+  
+  return null;
+}
+
+lower_expr :: (ctx: *LirContext, expr: *AstExpr) -> *LirValue {
+  if expr.tag == AstExpr_Binary  return lower_binary_expr(ctx, &expr.node.binary);
+  if expr.tag == AstExpr_Literal  return lower_literal(ctx, &expr.node.literal);
+  if expr.tag == AstExpr_Identifier  return lower_read_identifier(ctx, expr.node.identifier, ctx.current_block);
+  if expr.tag == AstExpr_Call  return lower_call(ctx, expr.node.call);
+  if expr.tag == AstExpr_Conditional  return lower_conditional(ctx, expr.node.conditional);
+ 
+  printf("Expr kind %d not yet supported\n", expr.tag); 
+  exit(-1);
+}
+
+lower_return :: (ctx: *LirContext, ret_expr: *AstExpr) {
+  
+  val: *LirValue = lower_expr(ctx, ret_expr);
+  ret: *LirValue = create_lir_value(ctx, Op_ret, val.type);
+  append(&ret.args, &val, PTR_SIZE);
+}
+
+lower_assignment :: (ctx: *LirContext, assignment: *AssignmentAstStmt) {
+  //TODO Handle compound rhs expressions
+  val: *LirValue = lower_expr(ctx, assignment.rhs);
+  lower_write_identifier(ctx, assignment.lhs.node.identifier, val, ctx.current_block);
+}
+
+lower_var_decl :: (ctx: *LirContext, name: *u8, decl: *VariableDecl) {
+  if decl.value {
+    val: *LirValue = lower_expr(ctx, decl.value);
+    lower_write_identifier(ctx, name, val, ctx.current_block);
+  }
+}
+
+lower_block :: (ctx: *LirContext, block: *AstBlock) {
+  
+  i : u32 = 0;
+  while i < block.num_stmts {
+    lower_stmt(ctx, block.stmts[i]);
+    i = i + 1;
+  }
+}
+
+lower_while_stmt :: (ctx: *LirContext, _while: WhileAstStmt) {  
+  entry_bb: *LirBasicBlock = ctx.current_block;
+  body_bb: *LirBasicBlock = start_basic_block(ctx);
+  append(&body_bb.predecessors, &entry_bb, PTR_SIZE);
+  append(&entry_bb.successors, &body_bb, PTR_SIZE);
+  
+  cond: *LirValue = lower_expr(ctx, _while.condition);
+  exit_jmp: *LirValue = create_lir_value(ctx, Op_jnz, null);
+  
+  lower_block(ctx, _while.body);
+  
+  last_bb: *LirBasicBlock = ctx.current_block;
+  append(&body_bb.predecessors, &last_bb, PTR_SIZE);
+  seal_block(ctx, last_bb);
+  loop_jmp: *LirValue = create_lir_value(ctx, Op_jmp, null);
+  loop_jmp.aux = body_bb.id;
+  
+  exit_bb: *LirBasicBlock = start_basic_block(ctx);
+  append(&exit_bb.predecessors, &entry_bb, PTR_SIZE);
+  append(&exit_bb.predecessors, &last_bb, PTR_SIZE);
+  append(&entry_bb.successors, &exit_bb, PTR_SIZE);
+  append(&last_bb.successors, &exit_bb, PTR_SIZE);
+  append(&last_bb.successors, &body_bb, PTR_SIZE);
+  
+  append(&exit_jmp.args, &cond, PTR_SIZE);
+  exit_jmp.aux = exit_bb.id;
+  
+  seal_block(ctx, exit_bb);
+}
+
+lower_stmt :: (ctx: *LirContext, stmt: *AstStmt) {
+ 
+  if stmt.tag == AstStmt_Assignment  lower_assignment(ctx, &stmt.node.assignment);
+  else if stmt.tag == AstStmt_Item  lower_var_decl(ctx, stmt.node.item.name, &stmt.node.item.node.variable);
+  else if stmt.tag == AstStmt_Return  lower_return(ctx, stmt.node._return);
+  else if stmt.tag == AstStmt_AstExpr  lower_expr(ctx, stmt.node.expr);  
+  else if stmt.tag == AstStmt_While  lower_while_stmt(ctx, stmt.node._while);
+  else {
+    printf("Stmt kind %d not yet supported\n", stmt.tag);
+  }
+ 
+}
+
+lower_func :: (ctx: *LirContext, func: *FunctionDecl, name: *u8) -> *LirFunction {
+
+  result : *LirFunction = malloc(sizeof(LirFunction));
+  result.name = name;
+  result.blocks = make(0);
+  
+  ctx.current_func = result;
+  
+  entry: *LirBasicBlock = start_basic_block(ctx);
+  seal_block(ctx, entry);
+  lower_block(ctx, func.block);
+
+  return result;
+  
+}
+
+
+name_of_lir_opcode :: (op: LirOpcode) -> *u8 {
+
+  if op == Op_add  return "add";
+  if op == Op_sub  return "sub";
+  if op == Op_mul  return "mul";
+  if op == Op_imul  return "imul";
+  if op == Op_div  return "div";
+  if op == Op_idiv  return "idiv";
+  if op == Op_mod  return "mod";
+  if op == Op_shl  return "shl";
+  if op == Op_shr  return "shr";
+  if op == Op_sar  return "sar";
+
+  if op == Op_neg  return "neg";
+  if op == Op_not  return "not";
+  if op == Op_and  return "and";
+  if op == Op_or  return "or";
+  if op == Op_xor  return "xor";
+  
+  if op == Op_le return "le";
+  if op == Op_leq return "leq";
+  if op == Op_ge return "ge";
+  if op == Op_geq return "geq";
+  if op == Op_eq return "eq";
+  if op == Op_neq return "neq";
+
+  if op == Op_alloca  return "alloca";
+  if op == Op_load  return "load";
+  if op == Op_store  return "store";
+  if op == Op_push  return "push";
+  if op == Op_pop  return "pop";
+
+  if op == Op_jmp  return "jmp";
+  if op == Op_je  return "je";
+  if op == Op_jne  return "jne";
+  if op == Op_jz  return "jz";
+  if op == Op_jnz  return "jnz";
+  if op == Op_call  return "call";
+  if op == Op_ret  return "ret";
+
+  if op == Op_ja  return "ja";
+  if op == Op_jae  return "jae";
+  if op == Op_jb  return "jbe";
+  if op == Op_jbe  return "jbe";
+
+  if op == Op_jg  return "jg";
+  if op == Op_jge  return "jge";
+  if op == Op_jl  return "jl";
+  if op == Op_jle  return "jle";
+
+  if op == Op_const32  return "const32";
+  if op == Op_const64  return "const64";
+
+  if op == Op_int  return "int";
+  if op == Op_phi  return "phi";
+
+  printf("Failed to find name for %d\n", op);
+  exit(-1);
+}
+
+output_lir_value :: (val: *LirValue) {
+  if val.opcode != Op_undef {
+    printf("\t%%%lu = %s", val.id, name_of_lir_opcode(val.opcode));
+    i : u32 = 0;
+    while i < (len(val.args) / PTR_SIZE) {
+      arg: *LirValue = val.args[i];
+      printf(" %%%lu", arg.id);
+      i = i + 1;
+    }
+    if val.opcode >= Op_const32 && val.opcode <= Op_const64  printf(" %lu", val.aux);
+    if val.opcode >= Op_jmp && val.opcode <= Op_jnz  printf(" b%lu", val.aux);
+    printf("\n");
+  }
+}
+
+output_lir_block :: (block: *LirBasicBlock) {
+  printf("b%lu:\n", block.id);
+  i : u32 = 0;
+  while i < (len(block.values) / PTR_SIZE) {
+    output_lir_value(block.values[i]);
+    i = i + 1;
+  }
+}
+
+output_lir_function :: (func: *LirFunction) {
+  printf("%s {\n", func.name);
+  i : u32 = 0;
+  while i < (len(func.blocks) / PTR_SIZE) {
+    output_lir_block(func.blocks[i]);
+    i = i + 1;
+  }
+  printf("}\n");
+}
+
+output_lir :: (funcs: []*LirFunction) {
+
+  i : u32 = 0; 
+  while i < (len(funcs) / PTR_SIZE) {
+    func : *LirFunction = funcs[i];
+    output_lir_function(func);
+    i = i + 1;
+  }
+}
+
+lower_ast_to_lir :: (ast: []*AstItem) -> []*LirFunction {
+
+  ctx: *LirContext = malloc(sizeof(LirContext));
+  ctx.functions = make(0);
+  ctx.current_block = null;
+  ctx.use_defs = hashmap_create(256);
+  
+  ctx.next_block_id = 0;
+  ctx.next_value_id = 0;
+
+  i : u32 = 0;
+
+  while i < (len(ast) / PTR_SIZE) {
+    item: *AstItem = ast[i];
+    if item.tag == AstItem_Function {
+      func : *LirFunction = lower_func(ctx, &item.node.function, item.name);
+      append(&ctx.functions, &func, PTR_SIZE);
+    }
+    i = i + 1;
+  }
+
+  output_lir(ctx.functions);
+
+  return ctx.functions;
+}
+
+//Register allocatior
+
+LiveSet :: struct {
+  data: []*LirValue,
+}
+
+set_create :: () -> *LiveSet {
+  live: *LiveSet = malloc(sizeof(LiveSet));
+  live.data = make(0);
+  return live;
+}
+
+set_add :: (set: *LiveSet, elem: *LirValue) {
+  i: u32 = 0;
+  found: bool = false;
+  while i < len(set.data) / PTR_SIZE {
+    if set.data[i] == elem {
+      found = true;
+      break;
+    }
+    i = i + 1;
+  }
+  if !found  append(&set.data, &elem, PTR_SIZE);
+}
+
+set_merge :: (a: *LiveSet, b: *LiveSet) {
+  i: u32 = 0;
+  while i < len(b.data) / PTR_SIZE {
+    set_add(a, b.data[i]);
+    i = i + 1;
+  }
+}
+
+set_remove :: (set: *LiveSet, elem: *LirValue) {
+  i: u32 = 0;
+  while i < len(set.data) / PTR_SIZE {
+    if set.data[i] == elem {
+      set.data[i] = set.data[len(set.data) / PTR_SIZE - 1];
+      pop(&set.data, PTR_SIZE);
+      break;
+    }
+    i = i + 1;
+  }
+}
+
+LiveInterval :: struct {
+  from: u32,
+  to: u32,
+  reg: u32,
+}
+
+add_range :: (intervals: *HashMap, vreg: *LirValue, from: u32, to: u32) {
+  interval: *LiveInterval = hashmap_lookup(intervals, vreg);
+  if !interval {
+    interval = malloc(sizeof(LiveInterval));
+    interval.from = from;
+    interval.to = to;
+    hashmap_insert(intervals, vreg, interval);
+  } else {
+    if interval.from > from  interval.from = from;
+    if interval.to < to  interval.to = to;
+  }
+}
+
+set_from :: (intervals: *HashMap, vreg: *LirValue, from: u32) {
+  interval: *LiveInterval = hashmap_lookup(intervals, vreg);
+  if !interval {
+    interval = malloc(sizeof(LiveInterval));
+    interval.from = from;
+    interval.to = from;
+    hashmap_insert(intervals, vreg, interval);
+  } else {
+    interval.from = from;
+  }
+}
+
+build_intervals :: (func: *LirFunction) -> *HashMap {
+
+  intervals: *HashMap = hashmap_create(128);
+
+  //Iterate through all blocks in reverse
+  i: s32 = (len(func.blocks) / PTR_SIZE) - 1;
+  while i >= 0 {
+  
+    //Construct the set *live* to be the union of all b's successors *liveIn*
+    live: *LiveSet = set_create();
+  
+    b: *LirBasicBlock = func.blocks[i];
+    
+    j: s32 = 0;    
+    while j < len(b.successors) / PTR_SIZE {
+      successor: *LirBasicBlock = b.successors[j];
+      if successor.id != b.id {
+        set_merge(live, successor.live_in);
+        
+        //TODO cache phi nodes in block
+        k: u32 = 0;
+        while k < len(successor.values) / PTR_SIZE {
+          val: *LirValue = successor.values[k];
+          if val.opcode == Op_phi {
+            l: u32 = 0;
+            while l < len(val.args) / PTR_SIZE {
+              set_add(live, val.args[l]);
+              l = l + 1;
+            }
+          }
+          k = k + 1;
+        }
+      }
+      
+      j = j + 1;
+    }
+    
+    //For all variables not yet defined in successors, extend the lifetime to the entire block
+    j = 0;
+    bb_from: *LirValue = b.values[0];
+    bb_to: *LirValue = b.values[len(b.values) / PTR_SIZE - 1];
+    while j < len(live.data) / PTR_SIZE {
+      operand: *LirValue = live.data[j];
+      add_range(intervals, operand, bb_from.id, bb_to.id);
+      j = j + 1;
+    }
+
+    //Scan in reverse through all the values in the block
+    //For all used values extend the lifetime to include this usage
+    //For all definitions finalize the variable
+    j = len(b.values) / PTR_SIZE - 1;
+    while j >= 0 {
+      op: *LirValue = b.values[j];
+      set_from(intervals, op, op.id);
+      set_remove(live, op);
+      k: u32 = 0;
+      while k < len(op.args) / PTR_SIZE {
+        set_add(live, op.args[k]);
+        add_range(intervals, op.args[k], bb_from.id, op.id);
+        k = k + 1;
+      }
+      j = j - 1;
+    }
+    
+    i = i - 1;
+    
+    //TODO Handle loop headers
+    
+    b.live_in = live;
+  }
+  
+  i = 0;
+  while i < intervals.size {
+    k: *LirValue = intervals.keys[i];
+    if k != null {
+      v: *LiveInterval = intervals.values[i];
+      printf("%lu: [%u - %u]\n", k.id, v.from, v.to);
+    }
+    i = i + 1;
+  }
+  
+  return intervals;
+}
+
+reg_alloc :: (functions: []*LirFunction) {
+  i: u32 = 0;
+  while i < len(functions) / PTR_SIZE {
+    intervals: *HashMap = build_intervals(functions[i]);
+    i = i + 1;
+  }
+}
+
+
+//Backend
+
+//Emit instructions
+
+CodegenContext :: struct {
+  data_segment: []*u8,
+  next_data_idx: u32,
+  bss_segment: []*u8,
+  next_bss_idx: u32,
+  code_segment: []*u8,
+  next_code_idx: u32,
+}
+
+emit_data_line :: (ctx: *CodegenContext, line: *u8) {
+  idx : u32 = ctx.next_data_idx;
+  ctx.next_data_idx = ctx.next_data_idx + 1;
+  ctx.data_segment[idx] = line;
+}
+
+emit_bss_line :: (ctx: *CodegenContext, line: *u8) {
+  idx : u32 = ctx.next_bss_idx;
+  ctx.next_bss_idx = ctx.next_bss_idx + 1;
+  ctx.bss_segment[idx] = line;
+}
+
+emit_code_line :: (ctx: *CodegenContext, line: *u8) {
+  idx : u32 = ctx.next_code_idx;
+  ctx.next_code_idx = ctx.next_code_idx + 1;
+  ctx.code_segment[idx] = line;
+}
+
+emit_function :: (ctx: *CodegenContext, func: *LirFunction) {
+  buffer: *u8 = malloc(40);
+  sprintf(buffer, "\n%s:\n", func.name);
+  emit_code_line(ctx, buffer);
+  i : u32 = 0;
+  while i < len(func.blocks) / PTR_SIZE {
+    //emit_basic_block(ctx, func.blocks[i]);
+    i = i + 1;
+  }
+}
+
+BSS_SIZE : u32 = 1024;
+DATA_SIZE : u32 = 1024;
+CODE_SIZE : u32 = 8096;
+
+codegen :: (filename: *u8, lir: []*LirFunction) {
+  ctx : *CodegenContext = malloc(sizeof(CodegenContext));
+
+  ctx.next_data_idx = 1;
+  ctx.next_bss_idx = 1;
+  ctx.next_code_idx = 1;
+
+  ctx.data_segment = make(8*DATA_SIZE);
+  ctx.bss_segment = make(8*BSS_SIZE);
+  ctx.code_segment = make(8*CODE_SIZE);
+
+  emit_function(ctx, lir[0]);
+
+  emit_code_line(ctx, "\n_start:\n");
+  emit_code_line(ctx, "\tmov ebx, 12\n");
+  emit_code_line(ctx, "\tmov eax, 1\n");
+  emit_code_line(ctx, "\tint 0x80\n");
+  emit_code_line(ctx, "\tret\n");
+
+
+  fp: *void = fopen(filename, "w");
+
+  fputs("global _start\n\n", fp);
+  i : u32 = 1;
+  while i < ctx.next_data_idx {
+    fputs(ctx.data_segment[i], fp);
+    i = i + 1;
+  }
+  i = 1;
+
+  fputs("\n\nsection .bss\n", fp);
+  while i < ctx.next_bss_idx {
+    fputs(ctx.bss_segment[i], fp);
+    i = i + 1;
+  }
+  i = 1;
+
+  fputs("\n\nsection .text\n", fp);
+  while i < ctx.next_code_idx {
+    fputs(ctx.code_segment[i], fp);
+    i = i + 1;
+  }
+ 
+  fclose(fp);
+}
+
+//Driver
+
+_paridae_entry :: () -> s32 {
+
+  fp: *void = fopen("examples/ssa_test.par", "r");
+  //fp: *void = fopen("src/compiler.par", "r");
+
+  if !fp {
+    return -1;
+  }
+
+  //Determine file size by seeking to the end of the file
+  fseek(fp, 0, 2); //SEEK_END = 2
+  filesize : u64 = ftell(fp);
+  rewind(fp);
+
+  source : *u8 = cast(*u8, malloc(filesize));
+
+  fread(source, filesize, 1, fp);
+
+  tokens : []Token = lex(source, filesize);
+
+  items : []AstItem = parse(tokens);
+
+  lir : []*LirFunction = lower_ast_to_lir(items);
+  
+  reg_alloc(lir);
+
+  codegen("output.S", lir);
+
+  delete(tokens);
+  delete(items);
+
+  fclose(fp);
+  
+  return 0;
+}
