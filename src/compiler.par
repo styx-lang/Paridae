@@ -17,6 +17,8 @@ exit :: (status: int)
 atoi :: (str: *u8) -> int
 atof :: (str: *u8) -> f64
 
+qsort :: (ptr: *void, count: u64, size: u64, comp: *void)
+
 //stdio.h
 
 fopen :: (filename: *u8, mode: *u8) -> *void
@@ -2083,6 +2085,15 @@ LiveInterval :: struct {
   from: u32,
   to: u32,
   reg: u32,
+  val: *LirValue,
+}
+
+compare_intervals :: (a: *void, b: *void) -> s32 {
+  i1: *LiveInterval = *cast(**LiveInterval, a);
+  i2: *LiveInterval = *cast(**LiveInterval, b);
+  if i1.from > i2.from  return 1;
+  if i1.from < i2.from  return -1;
+  return 0;
 }
 
 add_range :: (intervals: *HashMap, vreg: *LirValue, from: u32, to: u32) {
@@ -2110,7 +2121,7 @@ set_from :: (intervals: *HashMap, vreg: *LirValue, from: u32) {
   }
 }
 
-build_intervals :: (func: *LirFunction) -> *HashMap {
+build_intervals :: (func: *LirFunction) -> []*LiveInterval {
 
   intervals: *HashMap = hashmap_create(128);
 
@@ -2181,23 +2192,35 @@ build_intervals :: (func: *LirFunction) -> *HashMap {
     b.live_in = live;
   }
   
+  sorted_intervals: []*LiveInterval = make(0);
+  
   i = 0;
   while i < intervals.size {
     k: *LirValue = intervals.keys[i];
     if k != null {
       v: *LiveInterval = intervals.values[i];
-      printf("%lu: [%u - %u]\n", k.id, v.from, v.to);
+      v.val = k;
+      append(&sorted_intervals, &v, PTR_SIZE);
     }
     i = i + 1;
   }
   
-  return intervals;
+  slice: _paridae_slice = sorted_intervals;
+  
+  qsort(slice.ptr, len(sorted_intervals) / PTR_SIZE, 8, compare_intervals);  
+  
+  return sorted_intervals;
 }
 
 reg_alloc :: (functions: []*LirFunction) {
   i: u32 = 0;
   while i < len(functions) / PTR_SIZE {
-    intervals: *HashMap = build_intervals(functions[i]);
+    intervals: []*LiveInterval = build_intervals(functions[i]);
+    j: u32 = 0;
+    while j < len(intervals) / PTR_SIZE {
+      interval: *LiveInterval = intervals[j];
+      j = j + 1;
+    }
     i = i + 1;
   }
 }
