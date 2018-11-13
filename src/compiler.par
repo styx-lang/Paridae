@@ -2212,13 +2212,69 @@ build_intervals :: (func: *LirFunction) -> []*LiveInterval {
   return sorted_intervals;
 }
 
+RegAllocContext :: struct {
+  active: []*LiveInterval,
+  inactive: []*LiveInterval,
+  num_regs: u32,
+}
+
+expire_old_intervals :: (ctx: *RegAllocContext, interval: *LiveInterval) {
+  i: u32 = 0;
+  while i < len(ctx.active) / PTR_SIZE {
+    a: *LiveInterval = ctx.active[i];
+    if a && a.to < interval.from {
+      ctx.active[i] = null;
+    }
+    i = i + 1;
+  }
+}
+
+allocate_free_register :: (ctx: *RegAllocContext, interval: *LiveInterval) -> bool {
+  i: u32 = 0;
+  while i < len(ctx.active) / PTR_SIZE {
+    a: *LiveInterval = ctx.active[i];
+    if !a {
+      ctx.active[i] = interval;
+      interval.reg = i;
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
+allocate_blocked_register :: (ctx: *RegAllocContext, interval: *LiveInterval) {
+  printf("Failed to alloc free register!\n");
+  exit(0);
+}
+
 reg_alloc :: (functions: []*LirFunction) {
   i: u32 = 0;
+  
+  ctx: *RegAllocContext = malloc(sizeof(RegAllocContext));
+  ctx.num_regs = 5;
+  ctx.active = make(ctx.num_regs*PTR_SIZE);
+  while i < ctx.num_regs {
+    ctx.active[i] = null;
+    i = i + 1;
+  }
+  
+  i = 0;
   while i < len(functions) / PTR_SIZE {
     intervals: []*LiveInterval = build_intervals(functions[i]);
+    
     j: u32 = 0;
     while j < len(intervals) / PTR_SIZE {
       interval: *LiveInterval = intervals[j];
+      
+      if interval.val.opcode != Op_undef {
+        
+        expire_old_intervals(ctx, interval);
+        if !allocate_free_register(ctx, interval) {
+          allocate_blocked_register(interval);
+        }
+      }
+      
       j = j + 1;
     }
     i = i + 1;
